@@ -205,6 +205,7 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
 
       // Elementwise fusion.
       .addPass(createFusionOfTensorOpsPass)
+      .addPass(createFoldConstantAndExtractSlicePass)
       .addPredicatedPass(clEnableLinalgDetensorize,
                          mlir::createLinalgDetensorizePass)
       .addPass(mlir::createCanonicalizerPass)

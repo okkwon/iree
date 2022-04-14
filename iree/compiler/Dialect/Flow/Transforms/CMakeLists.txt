@@ -37,6 +37,7 @@ iree_cc_library(
     "DispatchLinalgOnTensors.cpp"
     "ExpandTensorShapes.cpp"
     "ExportBenchmarkFuncs.cpp"
+    "FoldConstantAndExtractSlice.cpp"
     "FusionOfTensorOps.cpp"
     "FusionUtils.cpp"
     "InferNumericNarrowing.cpp"

@@ -68,6 +68,12 @@ def ExportBenchmarkFuncs :
   let constructor = "mlir::iree_compiler::IREE::Flow::createExportBenchmarkFuncsPass()";
 }
 
+def FoldConstantAndExtractSlice :
+    Pass<"iree-fold-constant-and-extract-slice", ""> {
+  let summary = "Fold constant and extract slice";
+  let constructor = "mlir::iree_compiler::IREE::Flow::createFoldConstantAndExtractSlicePass()";
+}
+
 def FusionOfTensorOps :
     Pass<"iree-flow-fusion-of-tensor-ops", ""> {
   let summary = "Fuse operations on tensors";

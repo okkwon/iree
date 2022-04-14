@@ -123,6 +123,9 @@ createStripSignednessPass();
 // to be legalized before this pass.
 std::unique_ptr<Pass> createVerifyInputLegalityPass();
 
+// Create a pass to fold constant and extract_slice into a constant.
+std::unique_ptr<Pass> createFoldConstantAndExtractSlicePass();
+
 //===----------------------------------------------------------------------===//
 // Dispatches (flow.dispatch.workgroups)
 //===----------------------------------------------------------------------===//
