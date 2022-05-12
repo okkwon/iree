@@ -148,7 +148,7 @@ struct FusionOfTensorOpsPass
 
           auto genericOp = cast<linalg::GenericOp>(consumer.getOwner());
 
-          // If the op can alraedy be fused with a producer by tile + fuse, do
+          // If the op can already be fused with a producer by tile + fuse, do
           // nothing.
           for (OpOperand *operand : genericOp.getInputOperands()) {
             if (areLinalgOpsFusableUsingTileAndFuse(*operand)) {
