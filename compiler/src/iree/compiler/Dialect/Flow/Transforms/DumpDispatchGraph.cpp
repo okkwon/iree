@@ -16,16 +16,19 @@
 #include "iree/compiler/Dialect/Flow/IR/FlowOps.h"
 #include "iree/compiler/Dialect/Flow/Transforms/PassDetail.h"
 #include "iree/compiler/Dialect/Flow/Transforms/Passes.h"
+#include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 #include "iree/compiler/Dialect/Util/IR/UtilDialect.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/GraphWriter.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Support/IndentedOstream.h"
 
 namespace mlir {
@@ -83,7 +86,7 @@ static std::string escapeString(std::string str) {
           os << '\\' << '"';
           break;
         case '\r':  // translate "carriage return" as "\l"
-          os << '\\' << 'l';
+          os << '\\' << 'n';
           break;
         default:
           if (llvm::isPrint(c)) {
@@ -120,7 +123,13 @@ struct Node {
   Node(int id = 0, Optional<int> clusterId = llvm::None)
       : id(id), clusterId(clusterId) {}
 
+  Node(int id, std::string label, StringRef shape,
+       Optional<int> clusterId = llvm::None)
+      : id(id), label(label), shape(shape), clusterId(clusterId) {}
+
   int id;
+  std::string label;
+  StringRef shape;
   Optional<int> clusterId;
 };
 
@@ -144,7 +153,8 @@ class DumpDispatchGraphPass
 
     emitGraph([&]() {
       for (auto funcOp : funcOps) processOperation(funcOp);
-      emitAllEdgeStmts();
+      emitAllNodes();
+      emitAllEdges();
     });
   }
 
@@ -165,18 +175,23 @@ class DumpDispatchGraphPass
 
   /// Emit a cluster (subgraph). The specified builder generates the body of the
   /// cluster. Return the anchor node of the cluster.
-  Node emitClusterStmt(function_ref<void()> builder, std::string label = "") {
-    int clusterId = ++counter;
-    os << "subgraph cluster_" << clusterId << " {\n";
-    os.indent();
+  void emitClusterStmt(function_ref<void()> builder, std::string label = "") {
+    ++clusterId;
+    // os << "subgraph cluster_" << clusterId << " {\n";
+    // os.indent();
     // Emit invisible anchor node from/to which arrows can be drawn.
-    Node anchorNode = emitNodeStmt(" ", kShapeNone);
-    os << attrStmt("label", quoteString(escapeString(std::move(label))))
-       << ";\n";
+    // Node anchorNode = emitNodeStmt(" ", kShapeNone);
+    // os << attrStmt("label", quoteString(escapeString(std::move(label))))
+    //    << ";\n";
     builder();
-    os.unindent();
-    os << "}\n";
-    return Node(anchorNode.id, clusterId);
+    // os.unindent();
+    // os << "}\n";
+  }
+
+  /// Emit a cluster (subgraph). The specified builder generates the body of the
+  /// cluster. Return the anchor node of the cluster.
+  void visitRegion(function_ref<void()> builder, std::string label = "") {
+    builder();
   }
 
   /// Generate an attribute statement.
@@ -250,37 +265,46 @@ class DumpDispatchGraphPass
 
   /// Emit a graph. The specified builder generates the body of the graph.
   void emitGraph(function_ref<void()> builder) {
-    os << "digraph G {\n";
-    os.indent();
-    // Edges between clusters are allowed only in compound mode.
-    os << attrStmt("compound", "true") << ";\n";
+    os << "<html>\n"
+       << "<head>\n"
+       << "  <script type=\"text/javascript\" "
+          "src=\"https://unpkg.com/vis-network/standalone/umd/"
+          "vis-network.min.js\"></script>\n"
+       << "</head>\n"
+       << "<body>\n"
+       << "<div id=\"mynetwork\"></div>\n"
+       << "<script type=\"text/javascript\">\n"
+       << "  var options = {};\n"
+       << "  var container = document.getElementById('mynetwork');\n";
     builder();
-    os.unindent();
-    os << "}\n";
+    os << "  var data = {\n"
+       << "    nodes: nodes,\n"
+       << "    edges: edges\n"
+       << "  };\n"
+       << "  var network = new vis.Network(container, data, options);\n"
+       << "</script>\n"
+       << "</body>\n"
+       << "</html>\n";
   }
 
   /// Emit a node statement.
-  Node emitNodeStmt(Operation *op) {
-    int nodeId = ++counter;
-    AttributeMap attrs;
-    auto label = getLabel(op);
+  void visitOperationToCreateNode(Operation *op) {
+    ++nodeId;
     auto shape = getShape(op);
-    attrs["label"] = quoteString(escapeString(std::move(label)));
-    attrs["shape"] = shape.str();
-    os << llvm::format("v%i ", nodeId);
-    emitAttrList(os, attrs);
-    os << ";\n";
-    return Node(nodeId);
+    auto label = quoteString(escapeString(getLabel(op)));
+    auto node = new Node(nodeId, label, shape);
+    nodes.push_back(node);
+    operationToNode[op] = node;
+    for (Value result : op->getResults()) valueToNode[result] = node;
+    visitedOperations.push_back(op);
   }
-  Node emitNodeStmt(std::string label, StringRef shape = kShapeNode) {
-    int nodeId = ++counter;
-    AttributeMap attrs;
-    attrs["label"] = quoteString(escapeString(std::move(label)));
-    attrs["shape"] = shape.str();
-    os << llvm::format("v%i ", nodeId);
-    emitAttrList(os, attrs);
-    os << ";\n";
-    return Node(nodeId);
+
+  void visitBlockArg(BlockArgument &blockArg) {
+    ++nodeId;
+    auto label = quoteString(escapeString(getLabel(blockArg)));
+    auto node = new Node(nodeId, label, kShapeNode);
+    nodes.push_back(node);
+    valueToNode[blockArg] = node;
   }
 
   void printResults(raw_ostream &os, Operation *op, AsmState &state) {
@@ -479,16 +503,10 @@ class DumpDispatchGraphPass
   void processBlock(Block &block) {
     emitClusterStmt([&]() {
       for (BlockArgument &blockArg : block.getArguments())
-        valueToNode[blockArg] = emitNodeStmt(getLabel(blockArg));
+        visitBlockArg(blockArg);
 
-      // Emit a node for each operation.
-      Optional<Node> prevNode;
       for (Operation &op : block) {
-        Node nextNode = processOperation(&op);
-        if (printControlFlowEdges && prevNode)
-          emitEdgeStmt(*prevNode, nextNode, /*label=*/"",
-                       kLineStyleControlFlow);
-        prevNode = nextNode;
+        processOperation(&op);
       }
     });
   }
@@ -502,46 +520,82 @@ class DumpDispatchGraphPass
 
   /// Process an operation. If the operation has regions, emit a cluster.
   /// Otherwise, emit a node.
-  Node processOperation(Operation *op) {
-    Node node;
-
+  void processOperation(Operation *op) {
     // Do not handle some noisy Operations.
     if (isa<arith::ConstantOp>(op) || isa<Util::GlobalLoadOpInterface>(op)) {
-      return node;
+      return;
     }
+
+    // skip hal.buffer_view.dim
+    if (isa<IREE::HAL::BufferViewDimOp>(op)) return;
+
+    if (isa<AffineApplyOp>(op)) return;
+
+    if (isa<arith::ArithmeticDialect>(op->getDialect())) return;
 
     if (op->getNumRegions() == 1) {
       // do not generate a cluster when there is one region.
       processRegion(op->getRegion(0));
     } else if (op->getNumRegions() > 1) {
       // Emit cluster for op with regions.
-      node = emitClusterStmt(
+      visitRegion(
           [&]() {
             for (Region &region : op->getRegions()) processRegion(region);
           },
           getLabel(op));
     } else {
-      node = emitNodeStmt(op);
+      visitOperationToCreateNode(op);
     }
 
-    // Insert data flow edges originating from each operand.
-    if (printDataFlowEdges) {
+    return;
+  }
+
+  ///
+  void emitAllNodes() {
+    os << "  var nodes = new vis.DataSet([\n";
+    for (size_t i = 0, e = nodes.size(); i != e; ++i) {
+      Node *node = nodes[i];
+      os << "    { id: " << node->id << ", label: " << node->label << " }";
+      if (i == e - 1)
+        os << "\n";
+      else
+        os << ",\n";
+    }
+    os << "]);\n";
+  }
+
+  /// edge construction
+  void emitAllEdges() {
+    os << "  var edges = new vis.DataSet([\n";
+
+    SmallVector<std::pair<int64_t, int64_t>> edges;
+
+    for (Operation *op : visitedOperations) {
+      auto toNode = operationToNode[op];
+
+      // Insert data flow edges originating from each operand.
       unsigned numOperands = op->getNumOperands();
       for (unsigned i = 0; i < numOperands; i++) {
         auto operand = op->getOperand(i);
 
         // a constant operand is not going to be available in the map.
         if (valueToNode.count(operand)) {
-          emitEdgeStmt(valueToNode[op->getOperand(i)], node,
-                       /*label=*/numOperands == 1 ? "" : std::to_string(i),
-                       kLineStyleDataFlow);
+          Node *fromNode = valueToNode[operand];
+          edges.push_back({fromNode->id, toNode->id});
         }
       }
     }
-
-    for (Value result : op->getResults()) valueToNode[result] = node;
-
-    return node;
+    for (size_t i = 0, e = edges.size(); i != e; ++i) {
+      std::pair<int64_t, int64_t> edge = edges[i];
+      const int64_t from = std::get<0>(edge);
+      const int64_t to = std::get<1>(edge);
+      os << "    {from: " << from << ", to: " << to << "}";
+      if (i == e - 1)
+        os << "\n";
+      else
+        os << ",\n";
+    }
+    os << "  ]);\n";
   }
 
   /// Process a region.
@@ -560,10 +614,18 @@ class DumpDispatchGraphPass
   /// A list of edges. For simplicity, should be emitted after all nodes were
   /// emitted.
   std::vector<std::string> edges;
-  /// Mapping of SSA values to Graphviz nodes/clusters.
-  DenseMap<Value, Node> valueToNode;
+  /// Mapping of SSA values to graph nodes/clusters.
+  DenseMap<Value, Node *> valueToNode;
+  /// Mapping of Operation * to graph nodes
+  DenseMap<Operation *, Node *> operationToNode;
+
   /// Counter for generating unique node/subgraph identifiers.
-  int counter = 0;
+  int nodeId = 0;
+  int clusterId = 0;
+
+  SmallVector<Operation *> visitedOperations;
+  SmallVector<Value> visitedValue;
+  SmallVector<Node *> nodes;
 };
 
 }  // namespace
