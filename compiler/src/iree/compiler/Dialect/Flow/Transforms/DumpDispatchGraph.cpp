@@ -17,7 +17,6 @@
 #include "iree/compiler/Dialect/Flow/Transforms/PassDetail.h"
 #include "iree/compiler/Dialect/Flow/Transforms/Passes.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
-#include "iree/compiler/Dialect/Util/IR/UtilDialect.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/GraphWriter.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -160,6 +159,10 @@ class DumpDispatchGraphPass
       for (auto funcOp : funcOps) processOperation(funcOp);
       emitCytoscapeData();
     });
+
+    for (Node *node : nodes) {
+      delete node;
+    }
   }
 
  private:
@@ -323,370 +326,354 @@ class DumpDispatchGraphPass
 
   /// Emit a graph. The specified builder generates the body of the graph.
   void emitGraphCytoscape(function_ref<void()> builder) {
-    os << "<html>\n"
-       << "<head>\n"
-       << "  <script "
-          "src=\"https://unpkg.com/cytoscape/dist/cytoscape.min.js\"></"
-          "script>\n"
-       << "  <script "
-          "src=\"https://unpkg.com/dagre@0.7.4/dist/dagre.js\"></script>\n"
-       << "  <script "
-          "src=\"https://cdn.rawgit.com/cytoscape/cytoscape.js-dagre/1.5.0/"
-          "cytoscape-dagre.js\"></script>\n"
-       << "<script>\n"
-       << "  window.addEventListener('DOMContentLoaded', function(){\n"
-       << "  var cy = window.cy = cytoscape({\n"
-       << "    container: document.getElementById('cy'),\n"
-       << "    boxSelectionEnabled: false,\n"
-       << "    autounselectify: true,\n"
-       << "    layout: {\n"
-       << "      name: 'dagre'\n"
-       << "    },\n";
-  builder();
-  os << "    });\n"
-     << "  });\n"
-     << "  </script>\n"
-     << "</head>\n"
-     << "<body><div id=\"cy\"></div></body>\n"
-     << "</html>\n";
-}
+    builder();
+  }
 
   void emitCytoscapeData() {
-  os << "    elements: {\n"
-     << "      nodes: [\n";
-  for (size_t i = 0, e = nodes.size(); i != e; ++i) {
-    Node *node = nodes[i];
-    os << "        { data: { id: '" << node->id << "' } }";
-    if (i == e - 1)
-      os << "\n";
-    else
-      os << ",\n";
-  }
-  os << "      ],\n"
-     << "      edges: [\n";
-    
-  SmallVector<std::pair<int64_t, int64_t>> edges;
-
-  for (Operation *op : visitedOperations) {
-    auto toNode = operationToNode[op];
-
-    // Insert data flow edges originating from each operand.
-    unsigned numOperands = op->getNumOperands();
-    for (unsigned i = 0; i < numOperands; i++) {
-      auto operand = op->getOperand(i);
-
-      // a constant operand is not going to be available in the map.
-      if (valueToNode.count(operand)) {
-        Node *fromNode = valueToNode[operand];
-        edges.push_back({fromNode->id, toNode->id});
-      }
-    }
-  }
-  for (size_t i = 0, e = edges.size(); i != e; ++i) {
-    std::pair<int64_t, int64_t> edge = edges[i];
-    const int64_t from = std::get<0>(edge);
-    const int64_t to = std::get<1>(edge);
-    os << "        { data: { source: '" << from << "', target: '" << to << "' } }";
-    if (i == e - 1)
-      os << "\n";
-    else
-      os << ",\n";
-  }
-  os << "      ]\n"
-     << "    }\n";
-}
-
-/// Emit a node statement.
-void visitOperationToCreateNode(Operation *op) {
-  ++nodeId;
-  auto shape = getShape(op);
-  auto label = quoteString(escapeString(getLabel(op)));
-  auto node = new Node(nodeId, label, shape);
-  nodes.push_back(node);
-  operationToNode[op] = node;
-  for (Value result : op->getResults()) valueToNode[result] = node;
-  visitedOperations.push_back(op);
-}
-
-void visitBlockArg(BlockArgument &blockArg) {
-  ++nodeId;
-  auto label = quoteString(escapeString(getLabel(blockArg)));
-  auto node = new Node(nodeId, label, kShapeNode);
-  nodes.push_back(node);
-  valueToNode[blockArg] = node;
-}
-
-void printResults(raw_ostream &os, Operation *op, AsmState &state) {
-  for (auto result : op->getResults()) {
-    result.printAsOperand(os, state);
-  }
-}
-
-void printResultsAndName(raw_ostream &os, Operation *op, AsmState &state) {
-  printResults(os, op, state);
-  os << " = " << op->getName();
-}
-
-void printDispatchTensorLoad(raw_ostream &os, DispatchTensorLoadOp op,
-                             AsmState &state) {
-  printResultsAndName(os, op.getOperation(), state);
-  os << " ";
-  op.getSource().printAsOperand(os, state);
-  os << " -> " << op.getResult().getType();
-  os << "\r";
-}
-
-void printDispatchTensorStore(raw_ostream &os, DispatchTensorStoreOp op,
-                              AsmState &state) {
-  os << op->getName() << " ";
-  op.getValue().printAsOperand(os, state);
-  os << ", ";
-  op.getTarget().printAsOperand(os, state);
-  os << "\r";
-}
-
-void printGeneric(raw_ostream &os, linalg::GenericOp op, AsmState &state) {
-  printLinalgInsOuts(os, op, state);
-  for (Operation &operation : *op.getBlock()) {
-    os.indent(8);
-    annotateOperation(os, &operation, state);
-  }
-}
-
-template <typename T>
-void printLinalgInsOuts(raw_ostream &os, T op, AsmState &state) {
-  printResultsAndName(os, op.getOperation(), state);
-  os << " " << op.iterator_types() << "(";
-  printOperands(os, op.getInputs(), state);
-  os << ") -> (";
-  printOperands(os, op.getOutputs(), state);
-  os << ")\r";
-}
-
-void annotateOperation(raw_ostream &os, Operation *op, AsmState &state) {
-  if (isa<arith::ConstantOp>(op)) return;
-
-  if (isa<func::ReturnOp>(op)) return;
-
-  if (auto load = dyn_cast<DispatchTensorLoadOp>(op)) {
-    printDispatchTensorLoad(os, load, state);
-    return;
-  }
-
-  if (auto store = dyn_cast<DispatchTensorStoreOp>(op)) {
-    printDispatchTensorStore(os, store, state);
-    return;
-  }
-
-  if (auto generic = dyn_cast<linalg::GenericOp>(op)) {
-    printGeneric(os, generic, state);
-    return;
-  }
-
-  if (auto linalgOp = dyn_cast<linalg::MatmulOp>(op)) {
-    printLinalgInsOuts(os, linalgOp, state);
-    return;
-  }
-
-  if (auto linalgOp = dyn_cast<linalg::BatchMatmulOp>(op)) {
-    printLinalgInsOuts(os, linalgOp, state);
-    return;
-  }
-
-  os << *op << "\r";
-}
-
-void printDispatchBody(raw_ostream &os, DispatchOp &dispatchOp) {
-  // Find the entry point function from the dispatch entry point symbol
-  // attribute.
-  auto entryPoint = dispatchOp.getEntryPoint();
-  auto executableOp = cast<ExecutableOp>(SymbolTable::lookupNearestSymbolFrom(
-      dispatchOp, entryPoint.getRootReference()));
-  if (!executableOp) return;
-
-  auto calleeNameAttr = entryPoint.getLeafReference();
-  auto innerModule = executableOp.getInnerModule();
-  auto funcOps = innerModule.getOps<func::FuncOp>();
-  auto funcIt = llvm::find_if(funcOps, [&](func::FuncOp op) {
-    return op.getNameAttr() == calleeNameAttr;
-  });
-  if (funcIt == funcOps.end()) return;
-
-  auto callee = *funcIt;
-
-  AsmState state(callee);
-
-  // Iterate the operations of the function body and print important
-  // operation.
-  for (auto &block : callee.getBlocks()) {
-    for (auto &op : block.getOperations()) {
-      annotateOperation(os, &op, state);
-    }
-  }
-}
-
-void printOperands(raw_ostream &os, ::mlir::Operation::operand_range operands,
-                   AsmState &state) {
-  auto numOperands = operands.size();
-
-  for (auto it : llvm::enumerate(operands)) {
-    auto operand = it.value();
-    auto op = operand.getDefiningOp();
-
-    if (op && isScalarConstantOp(op)) {
-      auto ty = operand.getType();
-      if (ty.isa<IntegerType>()) {
-        os << cast<arith::ConstantIntOp>(op).value();
-      } else if (ty.isa<FloatType>()) {
-        cast<arith::ConstantFloatOp>(op).value().print(os);
-      } else {
-        os << cast<arith::ConstantIndexOp>(op).value();
-      }
-    } else {
-      operand.printAsOperand(os, state);
-    }
-
-    if (it.index() != numOperands - 1) {
-      os << ", ";
-    }
-  }
-}
-
-/// Generate a label for an operation.
-std::string getLabel(Operation *op) {
-  return strFromOs([&](raw_ostream &os) {
-    if (op->getNumRegions() == 0) {
-      auto funcOp = op->getParentOfType<func::FuncOp>();
-      AsmState state(funcOp);
-      printResults(os, op, state);
-      os << " = " << op->getName();
-
-      if (auto dispatch = dyn_cast<DispatchOp>(op)) {
-        // print workload
-        os << "[";
-        printOperands(os, dispatch.getWorkload(), state);
-        os << "]\n";
-
-        // Print entry function name, if there is only one entry function,
-        // then the name space and the entry function names are the same,
-        // and we can just print the function name to save space.
-        auto entryPoint = dispatch.getEntryPoint();
-        auto rootName = entryPoint.getRootReference();
-        auto leafName = entryPoint.getLeafReference();
-        if (rootName == leafName) {
-          os << leafName;
-        } else {
-          os << entryPoint;  // print the full name
-        }
-
-        // print entry function args
-        os << "(";
-        printOperands(os, dispatch.getArguments(), state);
-        os << ")\n";
-
-        printDispatchBody(os, dispatch);
-
-      } else {
+    os << "elements: {\n"
+       << "  nodes: [\n";
+    for (size_t i = 0, e = nodes.size(); i != e; ++i) {
+      Node *node = nodes[i];
+      os << "    { data: { id: '" << node->id << "', label: " << node->label
+         << " } }";
+      if (i == e - 1)
         os << "\n";
+      else
+        os << ",\n";
+    }
+    os << "  ],\n"
+       << "  edges: [\n";
+
+    SmallVector<std::pair<int64_t, int64_t>> edges;
+
+    // A same value can appear multiple times as operand
+    DenseMap<Value, bool> visited;
+
+    for (Operation *op : visitedOperations) {
+      auto toNode = operationToNode[op];
+
+      // Insert data flow edges originating from each operand.
+
+      visited.clear();
+
+      unsigned numOperands = op->getNumOperands();
+      for (unsigned i = 0; i < numOperands; i++) {
+        Value operand = op->getOperand(i);
+        if (visited.count(operand)) continue;
+        visited[operand] = true;
+        // a constant operand is not going to be available in the map.
+        if (valueToNode.count(operand)) {
+          Node *fromNode = valueToNode[operand];
+          edges.push_back({fromNode->id, toNode->id});
+        }
       }
+    }
+    for (size_t i = 0, e = edges.size(); i != e; ++i) {
+      std::pair<int64_t, int64_t> edge = edges[i];
+      const int64_t from = std::get<0>(edge);
+      const int64_t to = std::get<1>(edge);
+      os << "    { data: { source: '" << from << "', target: '" << to
+         << "' } }";
+      if (i == e - 1)
+        os << "\n";
+      else
+        os << ",\n";
+    }
+    os << "  ]\n"
+       << "}\n";
+  }
+
+  /// Emit a node statement.
+  void visitOperationToCreateNode(Operation *op) {
+    ++nodeId;
+    auto shape = getShape(op);
+    auto label = quoteString(escapeString(getLabel(op)));
+    auto node = new Node(nodeId, label, shape);
+    nodes.push_back(node);
+    operationToNode[op] = node;
+    for (Value result : op->getResults()) valueToNode[result] = node;
+    visitedOperations.push_back(op);
+  }
+
+  void visitBlockArg(BlockArgument &blockArg) {
+    ++nodeId;
+    auto label = quoteString(escapeString(getLabel(blockArg)));
+    auto node = new Node(nodeId, label, kShapeNode);
+    nodes.push_back(node);
+    valueToNode[blockArg] = node;
+  }
+
+  void printResults(raw_ostream &os, Operation *op, AsmState &state) {
+    for (auto result : op->getResults()) {
+      result.printAsOperand(os, state);
+    }
+  }
+
+  void printResultsAndName(raw_ostream &os, Operation *op, AsmState &state) {
+    printResults(os, op, state);
+    os << " = " << op->getName();
+  }
+
+  void printDispatchTensorLoad(raw_ostream &os, DispatchTensorLoadOp op,
+                               AsmState &state) {
+    printResultsAndName(os, op.getOperation(), state);
+    os << " ";
+    op.getSource().printAsOperand(os, state);
+    os << " -> " << op.getResult().getType();
+    os << "\r";
+  }
+
+  void printDispatchTensorStore(raw_ostream &os, DispatchTensorStoreOp op,
+                                AsmState &state) {
+    os << op->getName() << " ";
+    op.getValue().printAsOperand(os, state);
+    os << ", ";
+    op.getTarget().printAsOperand(os, state);
+    os << "\r";
+  }
+
+  void printGeneric(raw_ostream &os, linalg::GenericOp op, AsmState &state) {
+    printLinalgInsOuts(os, op, state);
+    for (Operation &operation : *op.getBlock()) {
+      os.indent(8);
+      annotateOperation(os, &operation, state);
+    }
+  }
+
+  template <typename T>
+  void printLinalgInsOuts(raw_ostream &os, T op, AsmState &state) {
+    printResultsAndName(os, op.getOperation(), state);
+    os << " " << op.iterator_types() << "(";
+    printOperands(os, op.getInputs(), state);
+    os << ") -> (";
+    printOperands(os, op.getOutputs(), state);
+    os << ")\r";
+  }
+
+  void annotateOperation(raw_ostream &os, Operation *op, AsmState &state) {
+    if (isa<arith::ConstantOp>(op)) return;
+
+    if (isa<func::ReturnOp>(op)) return;
+
+    if (auto load = dyn_cast<DispatchTensorLoadOp>(op)) {
+      printDispatchTensorLoad(os, load, state);
+      return;
+    }
+
+    if (auto store = dyn_cast<DispatchTensorStoreOp>(op)) {
+      printDispatchTensorStore(os, store, state);
+      return;
+    }
+
+    if (auto generic = dyn_cast<linalg::GenericOp>(op)) {
+      printGeneric(os, generic, state);
+      return;
+    }
+
+    if (auto linalgOp = dyn_cast<linalg::MatmulOp>(op)) {
+      printLinalgInsOuts(os, linalgOp, state);
+      return;
+    }
+
+    if (auto linalgOp = dyn_cast<linalg::BatchMatmulOp>(op)) {
+      printLinalgInsOuts(os, linalgOp, state);
+      return;
+    }
+
+    os << *op << "\r";
+  }
+
+  void printDispatchBody(raw_ostream &os, DispatchOp &dispatchOp) {
+    // Find the entry point function from the dispatch entry point symbol
+    // attribute.
+    auto entryPoint = dispatchOp.getEntryPoint();
+    auto executableOp = cast<ExecutableOp>(SymbolTable::lookupNearestSymbolFrom(
+        dispatchOp, entryPoint.getRootReference()));
+    if (!executableOp) return;
+
+    auto calleeNameAttr = entryPoint.getLeafReference();
+    auto innerModule = executableOp.getInnerModule();
+    auto funcOps = innerModule.getOps<func::FuncOp>();
+    auto funcIt = llvm::find_if(funcOps, [&](func::FuncOp op) {
+      return op.getNameAttr() == calleeNameAttr;
+    });
+    if (funcIt == funcOps.end()) return;
+
+    auto callee = *funcIt;
+
+    AsmState state(callee);
+
+    // Iterate the operations of the function body and print important
+    // operation.
+    for (auto &block : callee.getBlocks()) {
+      for (auto &op : block.getOperations()) {
+        annotateOperation(os, &op, state);
+      }
+    }
+  }
+
+  void printOperands(raw_ostream &os, ::mlir::Operation::operand_range operands,
+                     AsmState &state) {
+    auto numOperands = operands.size();
+
+    for (auto it : llvm::enumerate(operands)) {
+      auto operand = it.value();
+      auto op = operand.getDefiningOp();
+
+      if (op && isScalarConstantOp(op)) {
+        auto ty = operand.getType();
+        if (ty.isa<IntegerType>()) {
+          os << cast<arith::ConstantIntOp>(op).value();
+        } else if (ty.isa<FloatType>()) {
+          cast<arith::ConstantFloatOp>(op).value().print(os);
+        } else {
+          os << cast<arith::ConstantIndexOp>(op).value();
+        }
+      } else {
+        operand.printAsOperand(os, state);
+      }
+
+      if (it.index() != numOperands - 1) {
+        os << ", ";
+      }
+    }
+  }
+
+  /// Generate a label for an operation.
+  std::string getLabel(Operation *op) {
+    return strFromOs([&](raw_ostream &os) {
+      if (op->getNumRegions() == 0) {
+        auto funcOp = op->getParentOfType<func::FuncOp>();
+        AsmState state(funcOp);
+        printResults(os, op, state);
+        os << " = " << op->getName();
+
+        if (auto dispatch = dyn_cast<DispatchOp>(op)) {
+          // print workload
+          os << "[";
+          printOperands(os, dispatch.getWorkload(), state);
+          os << "]\n";
+
+          // Print entry function name, if there is only one entry function,
+          // then the name space and the entry function names are the same,
+          // and we can just print the function name to save space.
+          auto entryPoint = dispatch.getEntryPoint();
+          auto rootName = entryPoint.getRootReference();
+          auto leafName = entryPoint.getLeafReference();
+          if (rootName == leafName) {
+            os << leafName;
+          } else {
+            os << entryPoint;  // print the full name
+          }
+
+          // print entry function args
+          os << "(";
+          printOperands(os, dispatch.getArguments(), state);
+          os << ")\n";
+
+          printDispatchBody(os, dispatch);
+
+        } else {
+          os << "\n";
+        }
+      } else {
+        os << op->getName() << "\n";
+      }
+
+      if (printResultTypes) {
+        std::string buf;
+        llvm::raw_string_ostream ss(buf);
+        interleave(op->getResultTypes(), ss, "\n");
+        os << ss.str();
+      }
+    });
+  }
+
+  /// Generate a label for a block argument.
+  std::string getLabel(BlockArgument arg) {
+    return "arg" + std::to_string(arg.getArgNumber());
+  }
+
+  /// Process a block. Emit a cluster and one node per block argument and
+  /// operation inside the cluster.
+  void processBlock(Block &block) {
+    emitClusterStmt([&]() {
+      for (BlockArgument &blockArg : block.getArguments())
+        visitBlockArg(blockArg);
+
+      for (Operation &op : block) {
+        processOperation(&op);
+      }
+    });
+  }
+
+  bool isScalarConstantOp(Operation *op) {
+    if (auto constOp = dyn_cast<mlir::arith::ConstantOp>(op))
+      if (constOp.getResult().getType().isIntOrIndexOrFloat()) return true;
+
+    return false;
+  }
+
+  /// Process an operation. If the operation has regions, emit a cluster.
+  /// Otherwise, emit a node.
+  void processOperation(Operation *op) {
+    // // Do not handle some noisy Operations.
+    if (isa<arith::ConstantOp>(op) || isa<Util::GlobalLoadOpInterface>(op)) {
+      return;
+    }
+
+    // skip hal.buffer_view.dim
+    if (isa<IREE::HAL::BufferViewDimOp>(op)) return;
+
+    // if (isa<AffineApplyOp>(op)) return;
+
+    // if (isa<arith::ArithmeticDialect>(op->getDialect())) return;
+
+    if (op->getNumRegions() == 1) {
+      // do not generate a cluster when there is one region.
+      processRegion(op->getRegion(0));
+    } else if (op->getNumRegions() > 1) {
+      // Emit cluster for op with regions.
+      visitRegion(
+          [&]() {
+            for (Region &region : op->getRegions()) processRegion(region);
+          },
+          getLabel(op));
     } else {
-      os << op->getName() << "\n";
+      visitOperationToCreateNode(op);
     }
 
-    if (printResultTypes) {
-      std::string buf;
-      llvm::raw_string_ostream ss(buf);
-      interleave(op->getResultTypes(), ss, "\n");
-      os << ss.str();
-    }
-  });
-}
-
-/// Generate a label for a block argument.
-std::string getLabel(BlockArgument arg) {
-  return "arg" + std::to_string(arg.getArgNumber());
-}
-
-/// Process a block. Emit a cluster and one node per block argument and
-/// operation inside the cluster.
-void processBlock(Block &block) {
-  emitClusterStmt([&]() {
-    for (BlockArgument &blockArg : block.getArguments())
-      visitBlockArg(blockArg);
-
-    for (Operation &op : block) {
-      processOperation(&op);
-    }
-  });
-}
-
-bool isScalarConstantOp(Operation *op) {
-  if (auto constOp = dyn_cast<mlir::arith::ConstantOp>(op))
-    if (constOp.getResult().getType().isIntOrIndexOrFloat()) return true;
-
-  return false;
-}
-
-/// Process an operation. If the operation has regions, emit a cluster.
-/// Otherwise, emit a node.
-void processOperation(Operation *op) {
-  // Do not handle some noisy Operations.
-  if (isa<arith::ConstantOp>(op) || isa<Util::GlobalLoadOpInterface>(op)) {
     return;
   }
 
-  // skip hal.buffer_view.dim
-  if (isa<IREE::HAL::BufferViewDimOp>(op)) return;
-
-  if (isa<AffineApplyOp>(op)) return;
-
-  if (isa<arith::ArithmeticDialect>(op->getDialect())) return;
-
-  if (op->getNumRegions() == 1) {
-    // do not generate a cluster when there is one region.
-    processRegion(op->getRegion(0));
-  } else if (op->getNumRegions() > 1) {
-    // Emit cluster for op with regions.
-    visitRegion(
-        [&]() {
-          for (Region &region : op->getRegions()) processRegion(region);
-        },
-        getLabel(op));
-  } else {
-    visitOperationToCreateNode(op);
+  /// Process a region.
+  void processRegion(Region &region) {
+    for (Block &block : region.getBlocks()) processBlock(block);
   }
 
-  return;
-}
+  /// Truncate long strings.
+  std::string truncateString(std::string str) {
+    if (str.length() <= maxLabelLen) return str;
+    return str.substr(0, maxLabelLen) + "...";
+  }
 
-/// Process a region.
-void processRegion(Region &region) {
-  for (Block &block : region.getBlocks()) processBlock(block);
-}
+  /// Output stream to write DOT file to.
+  raw_indented_ostream os;
+  /// A list of edges. For simplicity, should be emitted after all nodes were
+  /// emitted.
+  std::vector<std::string> edges;
+  /// Mapping of SSA values to graph nodes/clusters.
+  DenseMap<Value, Node *> valueToNode;
+  /// Mapping of Operation * to graph nodes
+  DenseMap<Operation *, Node *> operationToNode;
 
-/// Truncate long strings.
-std::string truncateString(std::string str) {
-  if (str.length() <= maxLabelLen) return str;
-  return str.substr(0, maxLabelLen) + "...";
-}
+  /// Counter for generating unique node/subgraph identifiers.
+  int nodeId = 0;
+  int clusterId = 0;
 
-/// Output stream to write DOT file to.
-raw_indented_ostream os;
-/// A list of edges. For simplicity, should be emitted after all nodes were
-/// emitted.
-std::vector<std::string> edges;
-/// Mapping of SSA values to graph nodes/clusters.
-DenseMap<Value, Node *> valueToNode;
-/// Mapping of Operation * to graph nodes
-DenseMap<Operation *, Node *> operationToNode;
-
-/// Counter for generating unique node/subgraph identifiers.
-int nodeId = 0;
-int clusterId = 0;
-
-SmallVector<Operation *> visitedOperations;
-SmallVector<Value> visitedValue;
-SmallVector<Node *> nodes;
+  SmallVector<Operation *> visitedOperations;
+  SmallVector<Value> visitedValue;
+  SmallVector<Node *> nodes;
 };
 
 }  // namespace
