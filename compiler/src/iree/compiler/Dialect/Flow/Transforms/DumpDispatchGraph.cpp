@@ -623,7 +623,7 @@ class DumpDispatchGraphPass
     }
 
     // skip hal.buffer_view.dim
-    if (isa<IREE::HAL::BufferViewDimOp>(op)) return;
+    // if (isa<IREE::HAL::BufferViewDimOp>(op)) return;
 
     // if (isa<AffineApplyOp>(op)) return;
 
