@@ -146,17 +146,24 @@ class DumpDispatchGraphPass
     auto modOp = dyn_cast<ModuleOp>(getOperation());
     if (!modOp) return;
 
-    auto funcOps = modOp.getOps<func::FuncOp>();
+    SmallVector<func::FuncOp> funcOps(modOp.getOps<func::FuncOp>());
 
-    if (funcOps.empty()) return;
+    if (funcOps.empty() || funcOps.size() > 2) return;
+    func::FuncOp entryFunc;
 
+    if (funcOps.size() == 1)
+      entryFunc = funcOps[0];
+    else {
+      // When there are two func ops, the public one is the wrapper.
+      entryFunc = funcOps[0].isPublic() ? funcOps[1] : funcOps[0];
+    }
     // emitGraphVisJS([&]() {
     //   for (auto funcOp : funcOps) processOperation(funcOp);
     //   emitAllVisJS();
     // });
 
     emitGraphCytoscape([&]() {
-      for (auto funcOp : funcOps) processOperation(funcOp);
+      processOperation(entryFunc);
       emitCytoscapeData();
     });
 
@@ -325,9 +332,7 @@ class DumpDispatchGraphPass
   }
 
   /// Emit a graph. The specified builder generates the body of the graph.
-  void emitGraphCytoscape(function_ref<void()> builder) {
-    builder();
-  }
+  void emitGraphCytoscape(function_ref<void()> builder) { builder(); }
 
   void emitCytoscapeData() {
     os << "elements: {\n"
