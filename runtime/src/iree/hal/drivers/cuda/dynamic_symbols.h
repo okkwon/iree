@@ -40,6 +40,36 @@ iree_status_t iree_hal_cuda_dynamic_symbols_initialize(
 void iree_hal_cuda_dynamic_symbols_deinitialize(
     iree_hal_cuda_dynamic_symbols_t* syms);
 
+#if IREE_HAL_DRIVER_CUDA_NCCL
+// DynamicSymbols allow loading dynamically a subset of NCCL API. It
+// loads all the function declared in `dynamic_symbol_tables_nccl.h` and fail if
+// any of the symbol is not available. The functions signatures are matching
+// the declarations in `nccl.h`.
+typedef struct iree_hal_nccl_dynamic_symbols_t {
+  iree_dynamic_library_t* loader_library;
+
+#define NCCL_PFN_DECL(ncclSymbolName, ...) \
+  ncclResult_t (*ncclSymbolName)(__VA_ARGS__);
+#define NCCL_PFN_DECL_STR_RETURN(ncclSymbolName, ...) \
+  const char* (*ncclSymbolName)(__VA_ARGS__);
+#include "iree/hal/drivers/cuda/dynamic_symbol_tables_nccl.h"  // IWYU pragma: export
+#undef NCCL_PFN_DECL
+#undef NCCL_PFN_DECL_STR_RETURN
+} iree_hal_nccl_dynamic_symbols_t;
+
+// Initializes |out_syms| in-place with dynamically loaded NCCL symbols.
+// iree_hal_nccl_dynamic_symbols_deinitialize must be used to release the
+// library resources.
+iree_status_t iree_hal_nccl_dynamic_symbols_initialize(
+    iree_allocator_t host_allocator, iree_hal_nccl_dynamic_symbols_t* out_syms);
+
+// Deinitializes |syms| by unloading the backing library. All function pointers
+// will be invalidated. They _may_ still work if there are other reasons the
+// library remains loaded so be careful.
+void iree_hal_nccl_dynamic_symbols_deinitialize(
+    iree_hal_nccl_dynamic_symbols_t* syms);
+#endif  // IREE_HAL_DRIVER_CUDA_NCCL
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

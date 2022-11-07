@@ -47,6 +47,21 @@ iree_status_t iree_hal_cuda_result_to_status(
     iree_hal_cuda_dynamic_symbols_t* syms, CUresult result, const char* file,
     uint32_t line);
 
+#if IREE_HAL_DRIVER_CUDA_NCCL
+// Converts a ncclResult_t to an iree_status_t.
+//
+// Usage:
+//   iree_status_t status = NCCL_RESULT_TO_STATUS(ncclDoThing(...));
+#define NCCL_RESULT_TO_STATUS(syms, expr, ...) \
+  iree_hal_nccl_result_to_status((syms), ((syms)->expr), __FILE__, __LINE__)
+
+// Converts a ncclResult_t to a Status object.
+iree_status_t iree_hal_nccl_result_to_status(
+    iree_hal_nccl_dynamic_symbols_t* syms, ncclResult_t result,
+    const char* file, uint32_t line);
+
+#endif  // IREE_HAL_DRIVER_CUDA_NCCL
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <iree/base/status.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -32,6 +33,14 @@ typedef struct iree_hal_cuda_driver_t {
   int default_device_index;
   // CUDA symbols.
   iree_hal_cuda_dynamic_symbols_t syms;
+#if IREE_HAL_DRIVER_CUDA_NCCL
+  // NCCL symbols.
+  iree_hal_nccl_dynamic_symbols_t nccl_syms;
+  // NCCL process ID and number of processes
+  int procid;
+  int nprocs;
+  ncclUniqueId ncclUniqueId;
+#endif
 } iree_hal_cuda_driver_t;
 
 static const iree_hal_driver_vtable_t iree_hal_cuda_driver_vtable;
@@ -47,6 +56,55 @@ IREE_API_EXPORT void iree_hal_cuda_driver_options_initialize(
   memset(out_options, 0, sizeof(*out_options));
   out_options->default_device_index = 0;
 }
+
+#if IREE_HAL_DRIVER_CUDA_NCCL
+static iree_status_t iree_hal_cuda_driver_init_spmd_variables(
+    iree_hal_cuda_driver_t* driver) {
+  char* nprocs_str = getenv("IREE_SPMD_NPROCS");
+  if (!nprocs_str) {
+    driver->nprocs = 0;
+    driver->procid = 0;
+    return iree_status_from_code(IREE_STATUS_OK);
+  }
+
+  int nprocs = atoi(nprocs_str);
+  if (nprocs <= 0) return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
+  driver->nprocs = nprocs;
+
+  char* procid_str = getenv("IREE_SPMD_PROCID");
+  if (!procid_str) {
+    // Expected PROCID when NPROCS is set.
+    return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
+  }
+  int procid = atoi(procid_str);
+  if (procid < 0 || procid >= nprocs) {
+    return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
+  }
+  driver->procid = procid;
+  return iree_status_from_code(IREE_STATUS_OK);
+}
+
+static iree_status_t iree_hal_nccl_init_root(iree_hal_cuda_driver_t* driver) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, NCCL_RESULT_TO_STATUS(&driver->nccl_syms, ncclInitRoot(),
+                                "ncclInitRoot"));
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_nccl_get_unique_id_from_env(
+    iree_hal_cuda_driver_t* driver) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, NCCL_RESULT_TO_STATUS(&driver->nccl_syms,
+                                ncclGetUniqueIdFromEnv(&driver->ncclUniqueId),
+                                "ncclGetUniqueIdFromEnv"));
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+#endif  // IREE_HAL_DRIVER_CUDA_NCCL
 
 static iree_status_t iree_hal_cuda_driver_create_internal(
     iree_string_view_t identifier,
@@ -69,11 +127,44 @@ static iree_status_t iree_hal_cuda_driver_create_internal(
 
   iree_status_t status =
       iree_hal_cuda_dynamic_symbols_initialize(host_allocator, &driver->syms);
-  if (iree_status_is_ok(status)) {
-    *out_driver = (iree_hal_driver_t*)driver;
-  } else {
+  if (!iree_status_is_ok(status)) {
     iree_hal_driver_release((iree_hal_driver_t*)driver);
+    return status;
   }
+#if IREE_HAL_DRIVER_CUDA_NCCL
+  // load nccl symbols
+  status = iree_hal_nccl_dynamic_symbols_initialize(host_allocator,
+                                                    &driver->nccl_syms);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_driver_release((iree_hal_driver_t*)driver);
+    return status;
+  }
+
+  // read PROCID and NPROCS from the environmental variables
+  status = iree_hal_cuda_driver_init_spmd_variables(driver);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_driver_release((iree_hal_driver_t*)driver);
+    return status;
+  }
+
+  // Initialize NCCL if NPROCS is set.
+  if (driver->nprocs > 0) {
+    if (driver->procid == 0) {
+      status = iree_hal_nccl_init_root(driver);
+    }
+    if (!iree_status_is_ok(status)) {
+      iree_hal_driver_release((iree_hal_driver_t*)driver);
+      return status;
+    }
+    // get a unique ID from the environmental variable
+    status = iree_hal_nccl_get_unique_id_from_env(driver);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_driver_release((iree_hal_driver_t*)driver);
+      return status;
+    }
+  }
+#endif
+  *out_driver = (iree_hal_driver_t*)driver;
   return status;
 }
 
@@ -83,6 +174,9 @@ static void iree_hal_cuda_driver_destroy(iree_hal_driver_t* base_driver) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_cuda_dynamic_symbols_deinitialize(&driver->syms);
+#if IREE_HAL_DRIVER_CUDA_NCCL
+  iree_hal_nccl_dynamic_symbols_deinitialize(&driver->nccl_syms);
+#endif
   iree_allocator_free(host_allocator, driver);
 
   IREE_TRACE_ZONE_END(z0);
@@ -162,7 +256,7 @@ static iree_status_t iree_hal_cuda_populate_device_info(
   return iree_ok_status();
 }
 
-// Return true if the device support all the extension required.
+// Return true if the device supports all the extension required.
 static bool iree_hal_cuda_is_valid_device(iree_hal_cuda_driver_t* driver,
                                           CUdevice device) {
   return true;
