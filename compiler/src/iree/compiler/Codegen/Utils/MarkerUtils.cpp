@@ -40,6 +40,12 @@ StringRef getWorkgroupSpecializationMarker() {
   return "workgroup_specialization";
 }
 
+StringRef getGPUSimtLoweringReqMarker() { return "gpu_simt_lowering_req"; }
+
+StringRef getGPUTensorCoreLoweringReqMarker() {
+  return "gpu_tensorcore_lowering_req";
+}
+
 StringRef getCopyToWorkgroupMemoryMarker() {
   return "copy_to_workgroup_memory";
 }

@@ -24,8 +24,11 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/Transforms/Passes.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Matchers.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Support/MathExtras.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
@@ -182,6 +185,20 @@ static void populateTilingToInvocationPatterns(
       context, tilingOptions, f);
 }
 
+static void markCandidates(func::FuncOp funcOp) {
+  funcOp.walk([](linalg::LinalgOp op) {
+    if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp, linalg::GenericOp>(op))
+      return WalkResult::skip();
+
+    if (succeeded(alignedOpFilter(op))) {
+      setMarker(op, getGPUTensorCoreLoweringReqMarker());
+    } else {
+      setMarker(op, getGPUSimtLoweringReqMarker());
+    }
+    return WalkResult::advance();
+  });
+}
+
 namespace {
 struct LLVMGPUTileAndDistributePass
     : public LLVMGPUTileAndDistributeBase<LLVMGPUTileAndDistributePass> {
@@ -199,6 +216,10 @@ struct LLVMGPUTileAndDistributePass
     MLIRContext *context = &getContext();
     auto funcOp = getOperation();
     if (!isEntryPoint(funcOp)) return;
+
+    // Mark lowering candidates. An op can be a tensorcore or SIMT lowering
+    // candidate.
+    markCandidates(funcOp);
 
     // Promote C matrix and propagate the potential fill producer into the temp
     // allocation. This needs to be done before reduction tiling.

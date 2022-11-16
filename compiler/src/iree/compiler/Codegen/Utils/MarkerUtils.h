@@ -37,6 +37,12 @@ StringRef getWorkgroupL1TileMarker();
 /// specialization.
 StringRef getWorkgroupSpecializationMarker();
 
+/// Marker to denote that the op is marked for SIMT lowering
+StringRef getGPUSimtLoweringReqMarker();
+
+/// Marker to denote that the op is marked for tensorcore lowering
+StringRef getGPUTensorCoreLoweringReqMarker();
+
 /// Marker for copy operations that are moving data from StorageClass to
 /// Workgroup memory.
 StringRef getCopyToWorkgroupMemoryMarker();
