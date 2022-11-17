@@ -171,12 +171,13 @@ static void populateTilingToInvocationPatterns(
   MLIRContext *context = patterns.getContext();
   IREE::LinalgExt::LinalgTransformationFilter f(
       {StringAttr::get(context, getWorkgroupKTiledMarker()),
-       StringAttr::get(context, getWorkgroupMemoryMarker())},
-      StringAttr::get(context, getVectorizeMarker()));
+       StringAttr::get(context, getWorkgroupMemoryMarker()),
+       StringAttr::get(context, getGPUSimtLoweringReqMarker())
+      });
   f.addFilter([](Operation *op) {
      // FFT doesn't support second level of tiling yet.
      return success(!isa<IREE::LinalgExt::FftOp>(op));
-   }).setMatchByDefault();
+  });
   // Add the user provided filter if available.
   if (ff) f.addFilter(ff);
   patterns.insert<IREE::LinalgExt::LinalgTilingPattern,
@@ -389,7 +390,7 @@ struct LLVMGPUTileAndDistributePass
       // Apply last level of tiling and distribute to threads for unaligned ops.
       RewritePatternSet threadLevelTilingPatterns(context);
       populateTilingToInvocationPatterns(threadLevelTilingPatterns,
-                                         workgroupSize, unalignedOpFilter);
+                                         workgroupSize);
       if (failed(applyPatternsAndFoldGreedily(
               funcOp, std::move(threadLevelTilingPatterns)))) {
         return signalPassFailure();
