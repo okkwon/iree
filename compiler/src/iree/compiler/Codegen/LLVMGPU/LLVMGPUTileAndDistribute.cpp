@@ -27,7 +27,9 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/SCF/Transforms/Transforms.h"
 #include "mlir/IR/Matchers.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Visitors.h"
 #include "mlir/Support/MathExtras.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -199,6 +201,58 @@ static void markCandidates(func::FuncOp funcOp) {
   });
 }
 
+static LogicalResult tileTensorCoreKDim(func::FuncOp funcOp) {
+  // mark which linarg op is a tensorcore
+  markCandidates(funcOp);
+
+  auto context = funcOp.getContext();
+  RewritePatternSet patterns(context);
+  auto tileSizesFn = [](OpBuilder &builder,
+                        Operation *op) -> SmallVector<Value, 4> {
+    auto interfaceOp = cast<PartitionableLoopsInterface>(*op);
+    auto partitionedLoops =
+        interfaceOp.getPartitionableLoops(kNumMaxParallelDims);
+    SmallVector<Value, 4> tileSizes = getTileSizes(builder, op, 0);
+    auto zero = builder.create<arith::ConstantIndexOp>(op->getLoc(), 0);
+    for (unsigned depth : partitionedLoops) {
+      if (depth < tileSizes.size()) {
+        tileSizes[depth] = zero;
+      }
+    }
+    return tileSizes;
+  };
+
+  auto tilingOptions =
+      linalg::LinalgTilingOptions()
+          .setLoopType(linalg::LinalgTilingLoopType::Loops)
+          .setTileSizeComputationFunction(tileSizesFn)
+          .setPeeledLoops({0});  // peel off the partial iterations
+
+  IREE::LinalgExt::LinalgTransformationFilter filter(
+      ArrayRef<StringAttr>{
+          StringAttr::get(context, getGPUTensorCoreLoweringReqMarker())},
+      StringAttr::get(context, getWorkgroupKTiledMarker()));
+
+  TilingPatterns<linalg::MatmulOp, linalg::BatchMatmulOp,
+                 linalg::GenericOp>::insert(patterns, tilingOptions, filter);
+
+  if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns)))) {
+    return failure();
+  }
+
+  RewritePatternSet wgTilingCanonicalizationPatterns =
+      linalg::getLinalgTilingCanonicalizationPatterns(funcOp.getContext());
+  populateAffineMinSCFCanonicalizationPattern(wgTilingCanonicalizationPatterns);
+  scf::populateSCFForLoopCanonicalizationPatterns(
+      wgTilingCanonicalizationPatterns);
+  if (failed(applyPatternsAndFoldGreedily(
+          funcOp, std::move(wgTilingCanonicalizationPatterns)))) {
+    return failure();
+  }
+
+  return success();
+}
+
 namespace {
 struct LLVMGPUTileAndDistributePass
     : public LLVMGPUTileAndDistributeBase<LLVMGPUTileAndDistributePass> {
@@ -221,11 +275,15 @@ struct LLVMGPUTileAndDistributePass
     // candidate.
     markCandidates(funcOp);
 
+    auto tensorcoreFilter = IREE::LinalgExt::LinalgTransformationFilter(
+        {StringAttr::get(context, getGPUTensorCoreLoweringReqMarker())});
+
     // Promote C matrix and propagate the potential fill producer into the temp
     // allocation. This needs to be done before reduction tiling.
     {
       RewritePatternSet promotionPatterns(&getContext());
-      populateContractPromotionPatterns(promotionPatterns, {2});
+      populateContractPromotionPatterns(promotionPatterns, {2},
+                                        &tensorcoreFilter);
       if (failed(applyPatternsAndFoldGreedily(funcOp,
                                               std::move(promotionPatterns)))) {
         return signalPassFailure();
@@ -236,7 +294,7 @@ struct LLVMGPUTileAndDistributePass
     // Tile again at the workgroup level since reduction dimension were
     // ignored. Dimensions already tiled will be ignore since we tile to the
     // same size.
-    if (failed(tileToSerialLoops(funcOp))) {
+    if (failed(tileTensorCoreKDim(funcOp))) {
       return signalPassFailure();
     }
 
@@ -255,7 +313,8 @@ struct LLVMGPUTileAndDistributePass
     if (flatWorkgroupSize > kWarpSize) {
       RewritePatternSet promotionPatterns(&getContext());
 
-      populateContractPromotionPatterns(promotionPatterns, {0, 1});
+      populateContractPromotionPatterns(promotionPatterns, {0, 1},
+                                        &tensorcoreFilter);
 
       if (failed(applyPatternsAndFoldGreedily(funcOp,
                                               std::move(promotionPatterns)))) {
