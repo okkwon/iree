@@ -189,7 +189,7 @@ static void populateTilingToInvocationPatterns(
 
 static void markCandidates(func::FuncOp funcOp) {
   funcOp.walk([](linalg::LinalgOp op) {
-    if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp, linalg::GenericOp>(op))
+    if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp>(op))
       return WalkResult::skip();
 
     if (succeeded(alignedOpFilter(op))) {
@@ -233,8 +233,8 @@ static LogicalResult tileTensorCoreKDim(func::FuncOp funcOp) {
           StringAttr::get(context, getGPUTensorCoreLoweringReqMarker())},
       StringAttr::get(context, getWorkgroupKTiledMarker()));
 
-  TilingPatterns<linalg::MatmulOp, linalg::BatchMatmulOp,
-                 linalg::GenericOp>::insert(patterns, tilingOptions, filter);
+  TilingPatterns<linalg::MatmulOp, linalg::BatchMatmulOp>::insert(
+      patterns, tilingOptions, filter);
 
   if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns)))) {
     return failure();
