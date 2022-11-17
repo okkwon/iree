@@ -46,6 +46,10 @@ StringRef getGPUTensorCoreLoweringReqMarker() {
   return "gpu_tensorcore_lowering_req";
 }
 
+StringRef getGPUWarpLevelTilingReqMarker() {
+  return "gpu_warp_level_tiling_req";
+}
+
 StringRef getCopyToWorkgroupMemoryMarker() {
   return "copy_to_workgroup_memory";
 }

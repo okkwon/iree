@@ -28,6 +28,7 @@
 #include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Visitors.h"
@@ -123,7 +124,7 @@ static void populateTilingToWarpPatterns(
   auto getWarpProcInfoFn = [warpPerWorkgroup](
                                OpBuilder &builder, Location loc,
                                ArrayRef<Range> parallelLoopRanges) {
-    return getSubgroupIdsAndCounts(builder, loc, /*warpSize=*/32u,
+    return getSubgroupIdsAndCounts(builder, loc, kWarpSize,
                                    parallelLoopRanges.size(), warpPerWorkgroup);
   };
 
@@ -136,12 +137,8 @@ static void populateTilingToWarpPatterns(
                            .setDistributionOptions(warpDistributionOptions);
   MLIRContext *context = patterns.getContext();
   IREE::LinalgExt::LinalgTransformationFilter filter(
-      {StringAttr::get(context, getWorkgroupKTiledMarker()),
-       StringAttr::get(context, getWorkgroupMemoryMarker())},
+      {StringAttr::get(context, getGPUWarpLevelTilingReqMarker())},
       StringAttr::get(context, getVectorizeMarker()));
-  filter.setMatchByDefault();
-  // Bail out the case where the tensor sizes are not a multiple of tile sizes.
-  filter.addFilter(alignedOpFilter);
   TilingPatterns<linalg::MatmulOp, linalg::FillOp, linalg::BatchMatmulOp,
                  linalg::GenericOp>::insert(patterns, tilingOptions, filter);
 }
@@ -253,6 +250,28 @@ static LogicalResult tileTensorCoreKDim(func::FuncOp funcOp) {
   return success();
 }
 
+// Get K dimension size. It returns kDynamicSize for unknown cases.
+static int64_t getSizeK(linalg::LinalgOp op) {
+  int64_t sizeK = ShapedType::kDynamicSize;
+
+  if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp>(op)) return sizeK;
+
+  auto lhsShape =
+      op.getDpsInputOperand(0)->get().getType().cast<ShapedType>().getShape();
+  SmallVector<unsigned> exprs;
+  op.getReductionDims(exprs);
+  if (exprs.size() == 1) {
+    for (unsigned i = 0; i < lhsShape.size(); i++) {
+      if (op.getMatchingIndexingMap(op.getDpsInputOperand(0))
+              .getDimPosition(i) == exprs[0]) {
+        sizeK = lhsShape[i];
+        break;
+      }
+    }
+  }
+  return sizeK;
+}
+
 namespace {
 struct LLVMGPUTileAndDistributePass
     : public LLVMGPUTileAndDistributeBase<LLVMGPUTileAndDistributePass> {
@@ -339,6 +358,26 @@ struct LLVMGPUTileAndDistributePass
     });
 
     if (distributeToWarp) {
+      // mark candidates for the warp level tiling
+      funcOp.walk([&](linalg::LinalgOp op) {
+        if (failed(alignedOpFilter(op))) return WalkResult::skip();
+        if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp, linalg::FillOp>(op))
+          return WalkResult::skip();
+
+        // check if K is a multiple of Tile-K.
+        int64_t sizeK = getSizeK(op);
+        if (sizeK != ShapedType::kDynamicSize) {
+          // WG tile sizes
+          auto wgTileSizes = getTileSizes(op, 0);
+
+          if (sizeK % wgTileSizes[wgTileSizes.size() - 1] != 0)
+            return WalkResult::skip();
+        }
+
+        setMarker(op, getGPUWarpLevelTilingReqMarker());
+        return WalkResult::advance();
+      });
+
       // Apply last level of tiling and distribute to warps for aligned ops.
       RewritePatternSet warpLevelTilingPatterns(context);
       populateTilingToWarpPatterns(warpLevelTilingPatterns, workgroupSize);

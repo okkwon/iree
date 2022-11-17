@@ -43,6 +43,9 @@ StringRef getGPUSimtLoweringReqMarker();
 /// Marker to denote that the op is marked for tensorcore lowering
 StringRef getGPUTensorCoreLoweringReqMarker();
 
+/// Marker to denote that the op is marked for warp-level tiling
+StringRef getGPUWarpLevelTilingReqMarker();
+
 /// Marker for copy operations that are moving data from StorageClass to
 /// Workgroup memory.
 StringRef getCopyToWorkgroupMemoryMarker();
