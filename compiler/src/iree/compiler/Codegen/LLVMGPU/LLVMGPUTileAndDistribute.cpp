@@ -147,7 +147,8 @@ using FilterFunction = std::function<LogicalResult(Operation *)>;
 
 /// Patterns for thread level tiling.
 static void populateTilingToInvocationPatterns(
-    RewritePatternSet &patterns, SmallVectorImpl<int64_t> &workgroupSize) {
+    RewritePatternSet &patterns, SmallVectorImpl<int64_t> &workgroupSize,
+    bool matchByDefault = true) {
   linalg::TileSizeComputationFunction getInnerTileSizeFn =
       [&](OpBuilder &builder, Operation *operation) {
         return calculateDistributedTileSize(workgroupSize, builder, operation);
@@ -177,6 +178,7 @@ static void populateTilingToInvocationPatterns(
     // FFT doesn't support second level of tiling yet.
     return success(!isa<IREE::LinalgExt::FftOp>(op));
   });
+  if (matchByDefault) f.setMatchByDefault();
   patterns.insert<IREE::LinalgExt::LinalgTilingPattern,
                   IREE::LinalgExt::TilingInterfaceTilingPattern>(
       context, tilingOptions, f);
@@ -378,7 +380,8 @@ struct LLVMGPUTileAndDistributePass
       // Apply last level of tiling and distribute to threads for unaligned ops.
       RewritePatternSet threadLevelTilingPatterns(context);
       populateTilingToInvocationPatterns(threadLevelTilingPatterns,
-                                         workgroupSize);
+                                         workgroupSize,
+                                         /*matchByDefault=*/false);
       if (failed(applyPatternsAndFoldGreedily(
               funcOp, std::move(threadLevelTilingPatterns)))) {
         return signalPassFailure();
