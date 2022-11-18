@@ -260,8 +260,7 @@ static iree_status_t iree_hal_cuda_device_create_channel(
         "NCCL unavailable and collective operations cannot be performed");
   }
 
-  // Since today we take the ID as a parameter if we don't have one set we
-  // fail. At some point we should allow this to be passed in in a side-channel.
+  // Try to use the ID specified in the parameters and fall back to the default.
   iree_hal_cuda_nccl_id_t id;
   if (iree_const_byte_span_is_empty(params.id)) {
     // User wants the default.

@@ -50,7 +50,7 @@ typedef struct iree_hal_cuda_device_params_t {
   // IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION bit set will use this.
   bool allow_inline_execution;
 
-  // Opaque NCCL ID used during channel creation.
+  // Opaque NCCL ID used during channel creation when empty IDs are provided.
   // Today this is used for all communicators created but in the future this may
   // just be used as a default when not otherwise specified on channel creation.
   iree_hal_cuda_nccl_id_t nccl_default_id;
@@ -59,7 +59,8 @@ typedef struct iree_hal_cuda_device_params_t {
   // IREE_HAL_CHANNEL_RANK_DEFAULT is specified on creation calls.
   int nccl_default_rank;
   // Default total number of participants to use when creating collective
-  // channels.
+  // channels. This will be used IREE_HAL_CHANNEL_COUNT_DEFAULT is specified on
+  // creation calls.
   int nccl_default_count;
 } iree_hal_cuda_device_params_t;
 
