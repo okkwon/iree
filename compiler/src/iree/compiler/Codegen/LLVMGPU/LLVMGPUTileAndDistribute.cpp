@@ -305,8 +305,9 @@ struct LLVMGPUTileAndDistributePass
 
     // Tile again at the workgroup level since reduction dimension were
     // ignored. Dimensions already tiled will be ignore since we tile to the
-    // same size.
-    if (failed(tileToSerialLoops(funcOp, /*onlyReduction=*/true))) {
+    // same size. For distributing to warps, peel the partial iterations as
+    // a separate loop, since the warp distribution is requested for wmma.
+    if (failed(tileToSerialLoops(funcOp, /*peel=*/distributeToWarp))) {
       return signalPassFailure();
     }
 

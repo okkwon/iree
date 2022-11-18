@@ -32,20 +32,18 @@ namespace iree_compiler {
 /// Patterns for workgroup level tiling. Workgroup tiling is done at the flow
 /// level but we may have extra tiling for the reduction dimension. Therefore we
 /// tile again without distributing.
-static void populateTilingPatterns(RewritePatternSet &patterns,
-                                   bool onlyReduction) {
-  auto tileSizesFn = [onlyReduction](OpBuilder &builder,
+static void populateReductionTilingPatterns(RewritePatternSet &patterns,
+                                            bool peel) {
+  auto tileSizesFn = [](OpBuilder &builder,
                                      Operation *op) -> SmallVector<Value, 4> {
     auto interfaceOp = cast<PartitionableLoopsInterface>(*op);
     auto partitionedLoops =
         interfaceOp.getPartitionableLoops(kNumMaxParallelDims);
     SmallVector<Value, 4> tileSizes = getTileSizes(builder, op, 0);
-    if (onlyReduction) {
-      auto zero = builder.create<arith::ConstantIndexOp>(op->getLoc(), 0);
-      for (unsigned depth : partitionedLoops) {
-        if (depth < tileSizes.size()) {
-          tileSizes[depth] = zero;
-        }
+    auto zero = builder.create<arith::ConstantIndexOp>(op->getLoc(), 0);
+    for (unsigned depth : partitionedLoops) {
+      if (depth < tileSizes.size()) {
+        tileSizes[depth] = zero;
       }
     }
     return tileSizes;
@@ -54,6 +52,7 @@ static void populateTilingPatterns(RewritePatternSet &patterns,
   auto tilingOptions = linalg::LinalgTilingOptions()
                            .setLoopType(linalg::LinalgTilingLoopType::Loops)
                            .setTileSizeComputationFunction(tileSizesFn);
+  if (peel) tilingOptions.setPeeledLoops({0});
   MLIRContext *context = patterns.getContext();
 
   IREE::LinalgExt::LinalgTransformationFilter filter(
@@ -67,13 +66,13 @@ static void populateTilingPatterns(RewritePatternSet &patterns,
                                                    filter);
 }
 
-LogicalResult tileToSerialLoops(func::FuncOp funcOp, bool onlyReduction) {
+LogicalResult tileToSerialLoops(func::FuncOp funcOp, bool peel) {
   {
     // Tile again at the workgroup level since reduction dimension were
     // ignored. Dimensions already tiled will be ignore since we tile to the
     // same size.
     RewritePatternSet wgTilingPatterns(funcOp.getContext());
-    populateTilingPatterns(wgTilingPatterns, onlyReduction);
+    populateReductionTilingPatterns(wgTilingPatterns, peel);
     if (failed(applyPatternsAndFoldGreedily(funcOp,
                                             std::move(wgTilingPatterns)))) {
       return failure();
@@ -223,7 +222,7 @@ struct LLVMGPUTileTensorPass
 
     // Tile to serial loops to the wg tile size to handle reductions and other
     // dimension that have not been distributed.
-    if (failed(tileToSerialLoops(funcOp, /*onlyReduction=*/true))) {
+    if (failed(tileToSerialLoops(funcOp, /*peel=*/false))) {
       return signalPassFailure();
     }
 
