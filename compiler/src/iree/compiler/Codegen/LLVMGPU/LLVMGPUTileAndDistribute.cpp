@@ -352,7 +352,8 @@ struct LLVMGPUTileAndDistributePass
       // mark candidates for the warp level tiling
       funcOp.walk([&](linalg::LinalgOp op) {
         if (failed(alignedOpFilter(op))) return WalkResult::skip();
-        if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp, linalg::FillOp>(op))
+        if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp, linalg::FillOp,
+            linalg::GenericOp>(op))
           return WalkResult::skip();
 
         // check if K is a multiple of Tile-K.
