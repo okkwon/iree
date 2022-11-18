@@ -58,6 +58,10 @@ StringRef getTileReductionMarker() { return "tile_reduction"; }
 
 StringRef getVectorizeMarker() { return "vectorize"; }
 
+StringRef getVectorizeForTensorCoreMarker() {
+  return "vectorize_for_tensorcore";
+}
+
 StringRef getDeleteMarker() { return "delete"; }
 
 StringRef getMarkerOrNull(Operation *op) {

@@ -35,7 +35,7 @@ namespace iree_compiler {
 static void populateReductionTilingPatterns(RewritePatternSet &patterns,
                                             bool peel) {
   auto tileSizesFn = [](OpBuilder &builder,
-                                     Operation *op) -> SmallVector<Value, 4> {
+                        Operation *op) -> SmallVector<Value, 4> {
     auto interfaceOp = cast<PartitionableLoopsInterface>(*op);
     auto partitionedLoops =
         interfaceOp.getPartitionableLoops(kNumMaxParallelDims);

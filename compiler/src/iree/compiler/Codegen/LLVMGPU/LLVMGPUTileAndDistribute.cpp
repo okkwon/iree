@@ -138,7 +138,7 @@ static void populateTilingToWarpPatterns(
   MLIRContext *context = patterns.getContext();
   IREE::LinalgExt::LinalgTransformationFilter filter(
       {StringAttr::get(context, getGPUWarpLevelTilingReqMarker())},
-      StringAttr::get(context, getVectorizeMarker()));
+      StringAttr::get(context, getVectorizeForTensorCoreMarker()));
   TilingPatterns<linalg::MatmulOp, linalg::FillOp, linalg::BatchMatmulOp,
                  linalg::GenericOp>::insert(patterns, tilingOptions, filter);
 }
@@ -147,8 +147,7 @@ using FilterFunction = std::function<LogicalResult(Operation *)>;
 
 /// Patterns for thread level tiling.
 static void populateTilingToInvocationPatterns(
-    RewritePatternSet &patterns, SmallVectorImpl<int64_t> &workgroupSize,
-    const FilterFunction &ff = nullptr) {
+    RewritePatternSet &patterns, SmallVectorImpl<int64_t> &workgroupSize) {
   linalg::TileSizeComputationFunction getInnerTileSizeFn =
       [&](OpBuilder &builder, Operation *operation) {
         return calculateDistributedTileSize(workgroupSize, builder, operation);
@@ -172,14 +171,12 @@ static void populateTilingToInvocationPatterns(
   IREE::LinalgExt::LinalgTransformationFilter f(
       {StringAttr::get(context, getWorkgroupKTiledMarker()),
        StringAttr::get(context, getWorkgroupMemoryMarker()),
-       StringAttr::get(context, getGPUSimtLoweringReqMarker())
-      });
+       StringAttr::get(context, getGPUSimtLoweringReqMarker())},
+      StringAttr::get(context, getVectorizeMarker()));
   f.addFilter([](Operation *op) {
-     // FFT doesn't support second level of tiling yet.
-     return success(!isa<IREE::LinalgExt::FftOp>(op));
+    // FFT doesn't support second level of tiling yet.
+    return success(!isa<IREE::LinalgExt::FftOp>(op));
   });
-  // Add the user provided filter if available.
-  if (ff) f.addFilter(ff);
   patterns.insert<IREE::LinalgExt::LinalgTilingPattern,
                   IREE::LinalgExt::TilingInterfaceTilingPattern>(
       context, tilingOptions, f);

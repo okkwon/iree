@@ -56,6 +56,9 @@ StringRef getTileReductionMarker();
 /// Marker for operations that are going to be vectorized.
 StringRef getVectorizeMarker();
 
+/// Marker for operations that are going to be vectorized for tensorcore.
+StringRef getVectorizeForTensorCoreMarker();
+
 /// Marker for tagging an operation for deletion. Tile and fuse pattern does
 /// not delete the original operation to not invalidate the
 /// `linalg::LinalgDependenceGraph` data structure. Instead it is marked with
