@@ -291,19 +291,11 @@ struct LLVMGPUTileAndDistributePass
     auto funcOp = getOperation();
     if (!isEntryPoint(funcOp)) return;
 
-    // Mark lowering candidates. An op can be a tensorcore or SIMT lowering
-    // candidate.
-    markCandidates(funcOp);
-
-    auto tensorcoreFilter = IREE::LinalgExt::LinalgTransformationFilter(
-        {StringAttr::get(context, getGPUTensorCoreLoweringReqMarker())});
-
     // Promote C matrix and propagate the potential fill producer into the temp
     // allocation. This needs to be done before reduction tiling.
     {
       RewritePatternSet promotionPatterns(&getContext());
-      populateContractPromotionPatterns(promotionPatterns, {2},
-                                        &tensorcoreFilter);
+      populateContractPromotionPatterns(promotionPatterns, {2});
       if (failed(applyPatternsAndFoldGreedily(funcOp,
                                               std::move(promotionPatterns)))) {
         return signalPassFailure();
@@ -333,9 +325,7 @@ struct LLVMGPUTileAndDistributePass
     if (flatWorkgroupSize > kWarpSize) {
       RewritePatternSet promotionPatterns(&getContext());
 
-      populateContractPromotionPatterns(promotionPatterns, {0, 1},
-                                        &tensorcoreFilter);
-
+      populateContractPromotionPatterns(promotionPatterns, {0, 1});
       if (failed(applyPatternsAndFoldGreedily(funcOp,
                                               std::move(promotionPatterns)))) {
         return signalPassFailure();
