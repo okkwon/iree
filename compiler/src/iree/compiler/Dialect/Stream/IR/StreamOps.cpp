@@ -2156,8 +2156,8 @@ LogicalResult CmdCollectiveOp::verify() {
   }
   if (resourceCount != requiredCount) {
     return op->emitOpError()
-           << "requires " << requiredCount << " resources but only "
-           << resourceCount << " provided";
+           << "requires " << requiredCount << " resources but " << resourceCount
+           << " provided";
   }
   for (size_t i = 0; i < requiredCount; ++i) {
     auto declaredAccess = op.getResourceAccesses()[i]
