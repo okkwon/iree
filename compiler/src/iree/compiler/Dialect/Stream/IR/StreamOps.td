@@ -2415,7 +2415,7 @@ def Stream_CmdCollectiveOp : Stream_Op<"cmd.collective", [
   let arguments = (ins
     Stream_CollectiveAttr:$op,
     Stream_Channel:$channel,
-    Index:$element_count,
+    Stream_Size:$element_count,
     Optional<I32>:$param,
     Variadic<Stream_AnyStreamResource>:$resources,
     Variadic<Stream_Size>:$resource_sizes,
@@ -2958,6 +2958,7 @@ def Stream_ChannelDefaultOp : Stream_PureOp<"channel.default", [
 }
 
 def Stream_ChannelCreateOp : Stream_Op<"channel.create", [
+  AttrSizedOperandSegments,
   DeclareOpInterfaceMethods<OpAsmOpInterface, ["getAsmResultNames"]>,
   Stream_AffinityOp,
 ]> {
