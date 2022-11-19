@@ -283,6 +283,7 @@ enum iree_hal_collective_kind_e {
   // from source rank |param|.
   //
   // |param|: source performing a IREE_HAL_COLLECTIVE_KIND_SEND
+  // |send_binding|: unused
   // |recv_binding|: used on target
   // Equivalent to:
   //   ncclRecv
