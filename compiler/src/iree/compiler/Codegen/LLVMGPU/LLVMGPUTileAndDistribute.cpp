@@ -299,7 +299,17 @@ struct LLVMGPUTileAndDistributePass
                                               std::move(promotionPatterns)))) {
         return signalPassFailure();
       }
+      LLVM_DEBUG({
+        llvm::dbgs() << "After promote C:\n";
+        funcOp.dump();
+      });
+
       propagateSharedMemoryCopy(funcOp);
+
+      LLVM_DEBUG({
+        llvm::dbgs() << "After propagateSharedMemoryCopy():\n";
+        funcOp.dump();
+      });
     }
 
     // Tile again at the workgroup level since reduction dimension were
@@ -353,7 +363,7 @@ struct LLVMGPUTileAndDistributePass
       funcOp.walk([&](linalg::LinalgOp op) {
         if (failed(alignedOpFilter(op))) return WalkResult::skip();
         if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp, linalg::FillOp,
-            linalg::GenericOp>(op))
+                 linalg::GenericOp>(op))
           return WalkResult::skip();
 
         // check if K is a multiple of Tile-K.
