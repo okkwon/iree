@@ -366,6 +366,12 @@ struct LLVMGPUTileAndDistributePass
                  linalg::GenericOp>(op))
           return WalkResult::skip();
 
+        if (isa<linalg::GenericOp>(op) &&
+            hasMarker(op, getCopyToWorkgroupMemoryMarker())) {
+          // The GPUDistributeSharedMemoryCopy pass will handle it later.
+          return WalkResult::skip();
+        }
+
         // check if K is a multiple of Tile-K.
         int64_t sizeK = getSizeK(op);
         if (sizeK != ShapedType::kDynamicSize) {
