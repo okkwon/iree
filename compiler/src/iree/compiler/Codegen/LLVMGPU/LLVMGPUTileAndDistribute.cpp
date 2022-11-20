@@ -24,7 +24,14 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/Transforms/Passes.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/SCF/Transforms/Transforms.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Matchers.h"
+#include "mlir/IR/OperationSupport.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Support/MathExtras.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
@@ -117,9 +124,10 @@ static void populateTilingToWarpPatterns(
   auto getWarpProcInfoFn = [warpPerWorkgroup](
                                OpBuilder &builder, Location loc,
                                ArrayRef<Range> parallelLoopRanges) {
-    return getSubgroupIdsAndCounts(builder, loc, /*warpSize=*/32u,
+    return getSubgroupIdsAndCounts(builder, loc, kWarpSize,
                                    parallelLoopRanges.size(), warpPerWorkgroup);
   };
+
   linalg::LinalgLoopDistributionOptions warpDistributionOptions;
   warpDistributionOptions.procInfo = getWarpProcInfoFn;
 
@@ -129,17 +137,18 @@ static void populateTilingToWarpPatterns(
                            .setDistributionOptions(warpDistributionOptions);
   MLIRContext *context = patterns.getContext();
   IREE::LinalgExt::LinalgTransformationFilter filter(
-      {StringAttr::get(context, getWorkgroupKTiledMarker()),
-       StringAttr::get(context, getWorkgroupMemoryMarker())},
-      StringAttr::get(context, getVectorizeMarker()));
-  filter.setMatchByDefault();
+      {StringAttr::get(context, getGPUWarpLevelTilingReqMarker())},
+      StringAttr::get(context, getVectorizeForTensorCoreMarker()));
   TilingPatterns<linalg::MatmulOp, linalg::FillOp, linalg::BatchMatmulOp,
                  linalg::GenericOp>::insert(patterns, tilingOptions, filter);
 }
 
+using FilterFunction = std::function<LogicalResult(Operation *)>;
+
 /// Patterns for thread level tiling.
 static void populateTilingToInvocationPatterns(
-    RewritePatternSet &patterns, SmallVectorImpl<int64_t> &workgroupSize) {
+    RewritePatternSet &patterns, SmallVectorImpl<int64_t> &workgroupSize,
+    bool matchByDefault = true) {
   linalg::TileSizeComputationFunction getInnerTileSizeFn =
       [&](OpBuilder &builder, Operation *operation) {
         return calculateDistributedTileSize(workgroupSize, builder, operation);
@@ -162,15 +171,105 @@ static void populateTilingToInvocationPatterns(
   MLIRContext *context = patterns.getContext();
   IREE::LinalgExt::LinalgTransformationFilter f(
       {StringAttr::get(context, getWorkgroupKTiledMarker()),
-       StringAttr::get(context, getWorkgroupMemoryMarker())},
+       StringAttr::get(context, getWorkgroupMemoryMarker()),
+       StringAttr::get(context, getGPUSimtLoweringReqMarker())},
       StringAttr::get(context, getVectorizeMarker()));
   f.addFilter([](Operation *op) {
-     // FFT doesn't support second level of tiling yet.
-     return success(!isa<IREE::LinalgExt::FftOp>(op));
-   }).setMatchByDefault();
+    // FFT doesn't support second level of tiling yet.
+    return success(!isa<IREE::LinalgExt::FftOp>(op));
+  });
+  if (matchByDefault) f.setMatchByDefault();
   patterns.insert<IREE::LinalgExt::LinalgTilingPattern,
                   IREE::LinalgExt::TilingInterfaceTilingPattern>(
       context, tilingOptions, f);
+}
+
+static void markCandidates(func::FuncOp funcOp) {
+  funcOp.walk([](linalg::LinalgOp op) {
+    if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp>(op))
+      return WalkResult::skip();
+
+    if (succeeded(alignedOpFilter(op))) {
+      setMarker(op, getGPUTensorCoreLoweringReqMarker());
+    } else {
+      setMarker(op, getGPUSimtLoweringReqMarker());
+    }
+    return WalkResult::advance();
+  });
+}
+
+static LogicalResult tileTensorCoreKDim(func::FuncOp funcOp) {
+  // mark which linarg op is a tensorcore
+  markCandidates(funcOp);
+
+  auto context = funcOp.getContext();
+  RewritePatternSet patterns(context);
+  auto tileSizesFn = [](OpBuilder &builder,
+                        Operation *op) -> SmallVector<Value, 4> {
+    auto interfaceOp = cast<PartitionableLoopsInterface>(*op);
+    auto partitionedLoops =
+        interfaceOp.getPartitionableLoops(kNumMaxParallelDims);
+    SmallVector<Value, 4> tileSizes = getTileSizes(builder, op, 0);
+    auto zero = builder.create<arith::ConstantIndexOp>(op->getLoc(), 0);
+    for (unsigned depth : partitionedLoops) {
+      if (depth < tileSizes.size()) {
+        tileSizes[depth] = zero;
+      }
+    }
+    return tileSizes;
+  };
+
+  auto tilingOptions =
+      linalg::LinalgTilingOptions()
+          .setLoopType(linalg::LinalgTilingLoopType::Loops)
+          .setTileSizeComputationFunction(tileSizesFn)
+          .setPeeledLoops({0});  // peel off the partial iterations
+
+  IREE::LinalgExt::LinalgTransformationFilter filter(
+      ArrayRef<StringAttr>{
+          StringAttr::get(context, getGPUTensorCoreLoweringReqMarker())},
+      StringAttr::get(context, getWorkgroupKTiledMarker()));
+
+  TilingPatterns<linalg::MatmulOp, linalg::BatchMatmulOp>::insert(
+      patterns, tilingOptions, filter);
+
+  if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns)))) {
+    return failure();
+  }
+
+  RewritePatternSet wgTilingCanonicalizationPatterns =
+      linalg::getLinalgTilingCanonicalizationPatterns(funcOp.getContext());
+  populateAffineMinSCFCanonicalizationPattern(wgTilingCanonicalizationPatterns);
+  scf::populateSCFForLoopCanonicalizationPatterns(
+      wgTilingCanonicalizationPatterns);
+  if (failed(applyPatternsAndFoldGreedily(
+          funcOp, std::move(wgTilingCanonicalizationPatterns)))) {
+    return failure();
+  }
+
+  return success();
+}
+
+// Get K dimension size. It returns kDynamicSize for unknown cases.
+static int64_t getSizeK(linalg::LinalgOp op) {
+  int64_t sizeK = ShapedType::kDynamicSize;
+
+  if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp>(op)) return sizeK;
+
+  auto lhsShape =
+      op.getDpsInputOperand(0)->get().getType().cast<ShapedType>().getShape();
+  SmallVector<unsigned> exprs;
+  op.getReductionDims(exprs);
+  if (exprs.size() == 1) {
+    for (unsigned i = 0; i < lhsShape.size(); i++) {
+      if (op.getMatchingIndexingMap(op.getDpsInputOperand(0))
+              .getDimPosition(i) == exprs[0]) {
+        sizeK = lhsShape[i];
+        break;
+      }
+    }
+  }
+  return sizeK;
 }
 
 namespace {
@@ -191,7 +290,7 @@ struct LLVMGPUTileAndDistributePass
     auto funcOp = getOperation();
     if (!isEntryPoint(funcOp)) return;
 
-    // Promote C matrix and propagate the potential  fill producer into the temp
+    // Promote C matrix and propagate the potential fill producer into the temp
     // allocation. This needs to be done before reduction tiling.
     {
       RewritePatternSet promotionPatterns(&getContext());
@@ -200,13 +299,24 @@ struct LLVMGPUTileAndDistributePass
                                               std::move(promotionPatterns)))) {
         return signalPassFailure();
       }
+      LLVM_DEBUG({
+        llvm::dbgs() << "After promote C:\n";
+        funcOp.dump();
+      });
+
       propagateSharedMemoryCopy(funcOp);
+
+      LLVM_DEBUG({
+        llvm::dbgs() << "After propagateSharedMemoryCopy():\n";
+        funcOp.dump();
+      });
     }
 
     // Tile again at the workgroup level since reduction dimension were
     // ignored. Dimensions already tiled will be ignore since we tile to the
-    // same size.
-    if (failed(tileToSerialLoops(funcOp))) {
+    // same size. For distributing to warps, peel the partial iterations as
+    // a separate loop, since the warp distribution is requested for wmma.
+    if (failed(tileToSerialLoops(funcOp, /*peel=*/distributeToWarp))) {
       return signalPassFailure();
     }
 
@@ -226,7 +336,6 @@ struct LLVMGPUTileAndDistributePass
       RewritePatternSet promotionPatterns(&getContext());
 
       populateContractPromotionPatterns(promotionPatterns, {0, 1});
-
       if (failed(applyPatternsAndFoldGreedily(funcOp,
                                               std::move(promotionPatterns)))) {
         return signalPassFailure();
@@ -250,7 +359,34 @@ struct LLVMGPUTileAndDistributePass
     });
 
     if (distributeToWarp) {
-      // Apply last level of tiling and distribute to warps.
+      // mark candidates for the warp level tiling
+      funcOp.walk([&](linalg::LinalgOp op) {
+        if (failed(alignedOpFilter(op))) return WalkResult::skip();
+        if (!isa<linalg::BatchMatmulOp, linalg::MatmulOp, linalg::FillOp,
+                 linalg::GenericOp>(op))
+          return WalkResult::skip();
+
+        if (isa<linalg::GenericOp>(op) &&
+            hasMarker(op, getCopyToWorkgroupMemoryMarker())) {
+          // The GPUDistributeSharedMemoryCopy pass will handle it later.
+          return WalkResult::skip();
+        }
+
+        // check if K is a multiple of Tile-K.
+        int64_t sizeK = getSizeK(op);
+        if (sizeK != ShapedType::kDynamicSize) {
+          // WG tile sizes
+          auto wgTileSizes = getTileSizes(op, 0);
+
+          if (sizeK % wgTileSizes[wgTileSizes.size() - 1] != 0)
+            return WalkResult::skip();
+        }
+
+        setMarker(op, getGPUWarpLevelTilingReqMarker());
+        return WalkResult::advance();
+      });
+
+      // Apply last level of tiling and distribute to warps for aligned ops.
       RewritePatternSet warpLevelTilingPatterns(context);
       populateTilingToWarpPatterns(warpLevelTilingPatterns, workgroupSize);
       if (failed(applyPatternsAndFoldGreedily(
@@ -258,6 +394,15 @@ struct LLVMGPUTileAndDistributePass
         return signalPassFailure();
       }
 
+      // Apply last level of tiling and distribute to threads for unaligned ops.
+      RewritePatternSet threadLevelTilingPatterns(context);
+      populateTilingToInvocationPatterns(threadLevelTilingPatterns,
+                                         workgroupSize,
+                                         /*matchByDefault=*/false);
+      if (failed(applyPatternsAndFoldGreedily(
+              funcOp, std::move(threadLevelTilingPatterns)))) {
+        return signalPassFailure();
+      }
     } else {
       // Apply last level of tiling and distribute to threads.
       RewritePatternSet threadLevelTilingPatterns(context);

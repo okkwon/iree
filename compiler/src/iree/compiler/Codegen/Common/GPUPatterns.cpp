@@ -6,6 +6,7 @@
 
 #include "iree/compiler/Codegen/Common/GPUPatterns.h"
 
+#include "iree-dialects/Dialect/LinalgExt/Passes/Passes.h"
 #include "iree-dialects/Dialect/LinalgExt/Transforms/Transforms.h"
 #include "iree/compiler/Codegen/Utils/GPUUtils.h"
 #include "iree/compiler/Codegen/Utils/MarkerUtils.h"
@@ -165,8 +166,11 @@ void populateVectorTransferToGPUMMAPreparationPatterns(
   patterns.add<FlattenTransferReadOp>(patterns.getContext());
 }
 
+using LinalgTransformationFilter = IREE::LinalgExt::LinalgTransformationFilter;
+
 void populateContractPromotionPatterns(RewritePatternSet &patterns,
-                                       ArrayRef<int64_t> operandsToPromote) {
+                                       ArrayRef<int64_t> operandsToPromote,
+                                       LinalgTransformationFilter *filter) {
   MLIRContext *context = patterns.getContext();
   patterns.insert<LinalgPromotionPattern<linalg::MatmulOp>,
                   LinalgPromotionPattern<linalg::BatchMatmulOp>,
@@ -178,11 +182,12 @@ void populateContractPromotionPatterns(RewritePatternSet &patterns,
           .setCopyInOutFns(copyToWorkgroupMemory, copyToWorkgroupMemory)
           .setOperandsToPromote(operandsToPromote)
           .setUseFullTileBuffers({false, false}),
-      IREE::LinalgExt::LinalgTransformationFilter(
-          {StringAttr::get(context, getWorkgroupKTiledMarker())},
-          StringAttr::get(context, getWorkgroupMemoryMarker()))
-          .setMatchByDefault()
-          .addFilter(contractOpFilter));
+      filter ? *filter
+             : IREE::LinalgExt::LinalgTransformationFilter(
+                   {StringAttr::get(context, getWorkgroupKTiledMarker())},
+                   StringAttr::get(context, getWorkgroupMemoryMarker()))
+                   .setMatchByDefault()
+                   .addFilter(contractOpFilter));
 }
 
 }  // namespace iree_compiler

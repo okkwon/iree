@@ -36,6 +36,20 @@ StringRef getWorkgroupMemoryNumItemsGENumItersMarker() {
   return "workgroup_memory_numprocs_ge_numiters";
 }
 
+StringRef getWorkgroupSpecializationMarker() {
+  return "workgroup_specialization";
+}
+
+StringRef getGPUSimtLoweringReqMarker() { return "gpu_simt_lowering_req"; }
+
+StringRef getGPUTensorCoreLoweringReqMarker() {
+  return "gpu_tensorcore_lowering_req";
+}
+
+StringRef getGPUWarpLevelTilingReqMarker() {
+  return "gpu_warp_level_tiling_req";
+}
+
 StringRef getCopyToWorkgroupMemoryMarker() {
   return "copy_to_workgroup_memory";
 }
@@ -43,6 +57,10 @@ StringRef getCopyToWorkgroupMemoryMarker() {
 StringRef getTileReductionMarker() { return "tile_reduction"; }
 
 StringRef getVectorizeMarker() { return "vectorize"; }
+
+StringRef getVectorizeForTensorCoreMarker() {
+  return "vectorize_for_tensorcore";
+}
 
 StringRef getDeleteMarker() { return "delete"; }
 
@@ -65,6 +83,14 @@ bool hasMarker(Operation *op, ArrayRef<StringRef> marker) {
 void setMarker(Operation *op, StringRef marker) {
   op->setAttr(IREE::LinalgExt::LinalgTransforms::kLinalgTransformMarker,
               StringAttr::get(op->getContext(), marker));
+}
+
+Operation *findAncestorWithMarker(Operation *op, StringRef marker) {
+  while (op) {
+    if (hasMarker(op, marker)) return op;
+    op = op->getParentOp();
+  };
+  return nullptr;
 }
 
 }  // namespace iree_compiler

@@ -7,7 +7,9 @@
 #ifndef IREE_COMPILER_CODEGEN_COMMON_GPUPATTERNS_H_
 #define IREE_COMPILER_CODEGEN_COMMON_GPUPATTERNS_H_
 
+#include "iree-dialects/Dialect/LinalgExt/Passes/Passes.h"
 #include "mlir/IR/PatternMatch.h"
+
 namespace mlir {
 namespace iree_compiler {
 
@@ -18,8 +20,9 @@ void populateVectorTransferToGPUMMAPreparationPatterns(
 
 /// Adds patterns for promoting Linalg contract op's operands to use GPU shared
 /// memory.
-void populateContractPromotionPatterns(RewritePatternSet &patterns,
-                                       ArrayRef<int64_t> operandsToPromote);
+void populateContractPromotionPatterns(
+    RewritePatternSet &patterns, ArrayRef<int64_t> operandsToPromote,
+    IREE::LinalgExt::LinalgTransformationFilter *filter = nullptr);
 
 }  // namespace iree_compiler
 }  // namespace mlir

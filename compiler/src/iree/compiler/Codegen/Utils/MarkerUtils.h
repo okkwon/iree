@@ -33,6 +33,19 @@ StringRef getWorkgroupMemoryMarker();
 /// to workgroups L1 tiles.
 StringRef getWorkgroupL1TileMarker();
 
+/// Marker to scf.IfOp to denote that the op is inserted for workgroup
+/// specialization.
+StringRef getWorkgroupSpecializationMarker();
+
+/// Marker to denote that the op is marked for SIMT lowering
+StringRef getGPUSimtLoweringReqMarker();
+
+/// Marker to denote that the op is marked for tensorcore lowering
+StringRef getGPUTensorCoreLoweringReqMarker();
+
+/// Marker to denote that the op is marked for warp-level tiling
+StringRef getGPUWarpLevelTilingReqMarker();
+
 /// Marker for copy operations that are moving data from StorageClass to
 /// Workgroup memory.
 StringRef getCopyToWorkgroupMemoryMarker();
@@ -42,6 +55,9 @@ StringRef getTileReductionMarker();
 
 /// Marker for operations that are going to be vectorized.
 StringRef getVectorizeMarker();
+
+/// Marker for operations that are going to be vectorized for tensorcore.
+StringRef getVectorizeForTensorCoreMarker();
 
 /// Marker for tagging an operation for deletion. Tile and fuse pattern does
 /// not delete the original operation to not invalidate the
@@ -58,6 +74,9 @@ bool hasMarker(Operation *, ArrayRef<StringRef> markers = {});
 
 /// Sets a given marker on an operation.
 void setMarker(Operation *, StringRef);
+
+/// Find an ancester with the given marker.
+Operation *findAncestorWithMarker(Operation *op, StringRef marker);
 
 }  // namespace iree_compiler
 }  // namespace mlir
