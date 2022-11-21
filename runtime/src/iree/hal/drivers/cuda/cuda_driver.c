@@ -111,6 +111,12 @@ static iree_status_t iree_hal_cuda_driver_create_internal(
     const iree_hal_cuda_device_params_t* default_params,
     const iree_hal_cuda_driver_options_t* options,
     iree_allocator_t host_allocator, iree_hal_driver_t** out_driver) {
+#define IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status)  \
+  if (!iree_status_is_ok(status)) {                      \
+    iree_hal_driver_release((iree_hal_driver_t*)driver); \
+    return status;                                       \
+  }
+
   iree_hal_cuda_driver_t* driver = NULL;
   iree_host_size_t total_size = iree_sizeof_struct(*driver) + identifier.size;
   IREE_RETURN_IF_ERROR(
@@ -127,41 +133,27 @@ static iree_status_t iree_hal_cuda_driver_create_internal(
 
   iree_status_t status =
       iree_hal_cuda_dynamic_symbols_initialize(host_allocator, &driver->syms);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_driver_release((iree_hal_driver_t*)driver);
-    return status;
-  }
+  IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
+
 #if IREE_HAL_DRIVER_CUDA_NCCL
   // load nccl symbols
   status = iree_hal_nccl_dynamic_symbols_initialize(host_allocator,
                                                     &driver->nccl_syms);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_driver_release((iree_hal_driver_t*)driver);
-    return status;
-  }
+  IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
 
   // read PROCID and NPROCS from the environmental variables
   status = iree_hal_cuda_driver_init_spmd_variables(driver);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_driver_release((iree_hal_driver_t*)driver);
-    return status;
-  }
+  IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
 
   // Initialize NCCL if NPROCS is set.
   if (driver->nprocs > 0) {
     if (driver->procid == 0) {
       status = iree_hal_nccl_init_root(driver);
-    }
-    if (!iree_status_is_ok(status)) {
-      iree_hal_driver_release((iree_hal_driver_t*)driver);
-      return status;
+      IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
     }
     // get a unique ID from the environmental variable
     status = iree_hal_nccl_get_unique_id_from_env(driver);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_driver_release((iree_hal_driver_t*)driver);
-      return status;
-    }
+    IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
   }
 #endif
   *out_driver = (iree_hal_driver_t*)driver;
