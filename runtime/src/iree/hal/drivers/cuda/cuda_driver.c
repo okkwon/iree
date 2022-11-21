@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <iree/base/status.h>
+#include <nccl.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -36,10 +37,6 @@ typedef struct iree_hal_cuda_driver_t {
 #if IREE_HAL_DRIVER_CUDA_NCCL
   // NCCL symbols.
   iree_hal_nccl_dynamic_symbols_t nccl_syms;
-  // NCCL process ID and number of processes
-  int procid;
-  int nprocs;
-  ncclUniqueId ncclUniqueId;
 #endif
 } iree_hal_cuda_driver_t;
 
@@ -58,31 +55,6 @@ IREE_API_EXPORT void iree_hal_cuda_driver_options_initialize(
 }
 
 #if IREE_HAL_DRIVER_CUDA_NCCL
-static iree_status_t iree_hal_cuda_driver_init_spmd_variables(
-    iree_hal_cuda_driver_t* driver) {
-  char* nprocs_str = getenv("IREE_SPMD_NPROCS");
-  if (!nprocs_str) {
-    driver->nprocs = 0;
-    driver->procid = 0;
-    return iree_status_from_code(IREE_STATUS_OK);
-  }
-
-  int nprocs = atoi(nprocs_str);
-  if (nprocs <= 0) return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
-  driver->nprocs = nprocs;
-
-  char* procid_str = getenv("IREE_SPMD_PROCID");
-  if (!procid_str) {
-    // Expected PROCID when NPROCS is set.
-    return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
-  }
-  int procid = atoi(procid_str);
-  if (procid < 0 || procid >= nprocs) {
-    return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
-  }
-  driver->procid = procid;
-  return iree_status_from_code(IREE_STATUS_OK);
-}
 
 static iree_status_t iree_hal_nccl_init_root(iree_hal_cuda_driver_t* driver) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -97,9 +69,11 @@ static iree_status_t iree_hal_nccl_get_unique_id_from_env(
     iree_hal_cuda_driver_t* driver) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, NCCL_RESULT_TO_STATUS(&driver->nccl_syms,
-                                ncclGetUniqueIdFromEnv(&driver->ncclUniqueId),
-                                "ncclGetUniqueIdFromEnv"));
+      z0, NCCL_RESULT_TO_STATUS(
+              &driver->nccl_syms,
+              ncclGetUniqueIdFromEnv(
+                  (ncclUniqueId*)&driver->default_params.nccl_default_id),
+              "ncclGetUniqueIdFromEnv"));
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -141,13 +115,9 @@ static iree_status_t iree_hal_cuda_driver_create_internal(
                                                     &driver->nccl_syms);
   IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
 
-  // read PROCID and NPROCS from the environmental variables
-  status = iree_hal_cuda_driver_init_spmd_variables(driver);
-  IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
-
   // Initialize NCCL if NPROCS is set.
-  if (driver->nprocs > 0) {
-    if (driver->procid == 0) {
+  if (driver->default_params.nccl_default_count > 0) {
+    if (driver->default_params.nccl_default_rank == 0) {
       status = iree_hal_nccl_init_root(driver);
       IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
     }
