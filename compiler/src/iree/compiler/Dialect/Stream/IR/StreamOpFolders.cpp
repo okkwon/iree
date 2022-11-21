@@ -2034,7 +2034,7 @@ namespace {
 //  }
 template <typename Op>
 struct FoldSubviewsIntoDispatchOp : public OpRewritePattern<Op> {
-  using OpRewritePattern::OpRewritePattern;
+  using OpRewritePattern<Op>::OpRewritePattern;
   LogicalResult matchAndRewrite(Op op,
                                 PatternRewriter &rewriter) const override {
     SmallVector<ResourceSubviewOp> resourceSubviewOps;
