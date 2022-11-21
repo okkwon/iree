@@ -60,6 +60,25 @@ iree_status_t iree_hal_nccl_result_to_status(
     iree_hal_cuda_dynamic_symbols_t* syms, ncclResult_t result,
     const char* file, uint32_t line);
 
+// IREE_RETURN_IF_ERROR but implicitly converts the ncclResult_t return value to
+// a Status.
+//
+// Usage:
+//   NCCL_RETURN_IF_ERROR(ncclDoThing(...), "message");
+#define NCCL_RETURN_IF_ERROR(syms, expr, ...)                                 \
+  IREE_RETURN_IF_ERROR(iree_hal_nccl_result_to_status((syms), ((syms)->expr), \
+                                                      __FILE__, __LINE__),    \
+                       __VA_ARGS__)
+
+// IREE_IGNORE_ERROR but implicitly converts the ncclResult_t return value to a
+// Status.
+//
+// Usage:
+//   NCCL_IGNORE_ERROR(ncclDoThing(...));
+#define NCCL_IGNORE_ERROR(syms, expr)                                      \
+  IREE_IGNORE_ERROR(iree_hal_nccl_result_to_status((syms), ((syms)->expr), \
+                                                   __FILE__, __LINE__))
+
 #endif  // IREE_HAL_DRIVER_CUDA_NCCL
 
 #ifdef __cplusplus
