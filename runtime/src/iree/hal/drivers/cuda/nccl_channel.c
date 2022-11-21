@@ -5,11 +5,14 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/hal/drivers/cuda/nccl_channel.h"
-
+#if IREE_HAL_DRIVER_CUDA_NCCL
+#include <nccl.h>
+#endif
 #include <stddef.h>
 
 #include "iree/base/api.h"
 #include "iree/base/tracing.h"
+#include "iree/hal/drivers/cuda/status_util.h"
 
 // Returns the same value as NCCL's init.cc hashUniqueId.
 // These magic constants were chosen by their implementation and unlikely to
@@ -67,24 +70,21 @@ iree_status_t iree_hal_cuda_nccl_channel_create(
   IREE_TRACE_ZONE_APPEND_VALUE(z0, rank);
   IREE_TRACE_ZONE_APPEND_VALUE(z0, count);
 
-  // TODO(#9580): actually use nccl to create a communicator.
-  // Something like:
-  //  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-  //  config.blocking = 0;
-  //  syms->ncclCommInitRankConfig(&comm, count, *id, rank, &config);
-  // NOTE: CHECK ERRORS! we can safely return here as we haven't allocated the
-  // channel wrapper yet.
   ncclComm_t comm = NULL;
-  if (!comm) {
+  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  config.blocking = 0;
+  iree_status_t status = NCCL_RESULT_TO_STATUS(
+      context_wrapper->syms,
+      ncclCommInitRankConfig(&comm, count, *((const ncclUniqueId*)id), rank,
+                             &config));
+  if (!iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "failed to create NCCL communicator for rank=%d count=%d", rank, count);
+    return status;
   }
 
   iree_hal_cuda_nccl_channel_t* channel = NULL;
-  iree_status_t status = iree_allocator_malloc(
-      context_wrapper->host_allocator, sizeof(*channel), (void**)&channel);
+  status = iree_allocator_malloc(context_wrapper->host_allocator,
+                                 sizeof(*channel), (void**)&channel);
   if (iree_status_is_ok(status)) {
     iree_hal_resource_initialize(&iree_hal_cuda_nccl_channel_vtable,
                                  &channel->resource);
