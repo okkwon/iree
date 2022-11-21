@@ -66,6 +66,7 @@ NCCL_PFN_DECL(ncclInitRoot)
 NCCL_PFN_DECL(ncclGetUniqueIdFromEnv, ncclUniqueId *)
 NCCL_PFN_DECL(ncclCommInitRankConfig, ncclComm_t *, int, ncclUniqueId, int,
               ncclConfig_t *)
+NCCL_PFN_DECL(ncclCommInitRank, ncclComm_t *, int, ncclUniqueId, int)
 NCCL_PFN_DECL(ncclCommInitAll, ncclComm_t *, int, const int *)
 NCCL_PFN_DECL(ncclCommFinalize, ncclComm_t)
 NCCL_PFN_DECL(ncclCommDestroy, ncclComm_t)
