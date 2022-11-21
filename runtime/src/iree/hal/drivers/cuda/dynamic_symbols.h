@@ -20,7 +20,7 @@ extern "C" {
 // any of the symbol is not available. The functions signatures are matching
 // the declarations in `cuda.h`.
 typedef struct iree_hal_cuda_dynamic_symbols_t {
-  iree_dynamic_library_t* loader_library;
+  iree_dynamic_library_t* cuda_library;
 
 #define CU_PFN_DECL(cudaSymbolName, ...) \
   CUresult (*cudaSymbolName)(__VA_ARGS__);
@@ -46,7 +46,7 @@ void iree_hal_cuda_dynamic_symbols_deinitialize(
 // any of the symbol is not available. The functions signatures are matching
 // the declarations in `nccl.h`.
 typedef struct iree_hal_nccl_dynamic_symbols_t {
-  iree_dynamic_library_t* loader_library;
+  iree_dynamic_library_t* nccl_library;
 
 #define NCCL_PFN_DECL(ncclSymbolName, ...) \
   ncclResult_t (*ncclSymbolName)(__VA_ARGS__);
