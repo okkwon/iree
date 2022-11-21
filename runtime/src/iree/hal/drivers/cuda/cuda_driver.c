@@ -34,10 +34,6 @@ typedef struct iree_hal_cuda_driver_t {
   int default_device_index;
   // CUDA symbols.
   iree_hal_cuda_dynamic_symbols_t syms;
-#if IREE_HAL_DRIVER_CUDA_NCCL
-  // NCCL symbols.
-  iree_hal_nccl_dynamic_symbols_t nccl_syms;
-#endif
 } iree_hal_cuda_driver_t;
 
 static const iree_hal_driver_vtable_t iree_hal_cuda_driver_vtable;
@@ -59,8 +55,7 @@ IREE_API_EXPORT void iree_hal_cuda_driver_options_initialize(
 static iree_status_t iree_hal_nccl_init_root(iree_hal_cuda_driver_t* driver) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, NCCL_RESULT_TO_STATUS(&driver->nccl_syms, ncclInitRoot(),
-                                "ncclInitRoot"));
+      z0, NCCL_RESULT_TO_STATUS(&driver->syms, ncclInitRoot(), "ncclInitRoot"));
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -70,7 +65,7 @@ static iree_status_t iree_hal_nccl_get_unique_id_from_env(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, NCCL_RESULT_TO_STATUS(
-              &driver->nccl_syms,
+              &driver->syms,
               ncclGetUniqueIdFromEnv(
                   (ncclUniqueId*)&driver->default_params.nccl_default_id),
               "ncclGetUniqueIdFromEnv"));
@@ -110,11 +105,6 @@ static iree_status_t iree_hal_cuda_driver_create_internal(
   IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
 
 #if IREE_HAL_DRIVER_CUDA_NCCL
-  // load nccl symbols
-  status = iree_hal_nccl_dynamic_symbols_initialize(host_allocator,
-                                                    &driver->nccl_syms);
-  IREE_RELEASE_DRIVER_AND_RETURN_IF_ERROR(status);
-
   // Initialize NCCL if NPROCS is set.
   if (driver->default_params.nccl_default_count > 0) {
     if (driver->default_params.nccl_default_rank == 0) {
@@ -136,9 +126,6 @@ static void iree_hal_cuda_driver_destroy(iree_hal_driver_t* base_driver) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_cuda_dynamic_symbols_deinitialize(&driver->syms);
-#if IREE_HAL_DRIVER_CUDA_NCCL
-  iree_hal_nccl_dynamic_symbols_deinitialize(&driver->nccl_syms);
-#endif
   iree_allocator_free(host_allocator, driver);
 
   IREE_TRACE_ZONE_END(z0);

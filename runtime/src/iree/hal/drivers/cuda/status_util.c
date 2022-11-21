@@ -33,7 +33,7 @@ iree_status_t iree_hal_cuda_result_to_status(
 
 #if IREE_HAL_DRIVER_CUDA_NCCL
 iree_status_t iree_hal_nccl_result_to_status(
-    iree_hal_nccl_dynamic_symbols_t* syms, ncclResult_t result,
+    iree_hal_cuda_dynamic_symbols_t* syms, ncclResult_t result,
     const char* file, uint32_t line) {
   if (IREE_LIKELY(result == ncclSuccess)) {
     return iree_ok_status();

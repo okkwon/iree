@@ -57,7 +57,7 @@ iree_status_t iree_hal_cuda_result_to_status(
 
 // Converts a ncclResult_t to a Status object.
 iree_status_t iree_hal_nccl_result_to_status(
-    iree_hal_nccl_dynamic_symbols_t* syms, ncclResult_t result,
+    iree_hal_cuda_dynamic_symbols_t* syms, ncclResult_t result,
     const char* file, uint32_t line);
 
 #endif  // IREE_HAL_DRIVER_CUDA_NCCL

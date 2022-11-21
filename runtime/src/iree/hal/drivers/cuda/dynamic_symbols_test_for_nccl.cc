@@ -24,8 +24,8 @@ namespace {
   }
 
 TEST(DynamicSymbolsTest, CreateFromSystemLoader) {
-  iree_hal_nccl_dynamic_symbols_t symbols;
-  iree_status_t status = iree_hal_nccl_dynamic_symbols_initialize(
+  iree_hal_cuda_dynamic_symbols_t symbols;
+  iree_status_t status = iree_hal_cuda_dynamic_symbols_initialize(
       iree_allocator_system(), &symbols);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
@@ -37,7 +37,7 @@ TEST(DynamicSymbolsTest, CreateFromSystemLoader) {
   int nccl_version = 0;
   NCCL_CHECK_ERRORS(symbols.ncclGetVersion(&nccl_version));
   ASSERT_EQ(NCCL_VERSION_CODE, nccl_version);
-  iree_hal_nccl_dynamic_symbols_deinitialize(&symbols);
+  iree_hal_cuda_dynamic_symbols_deinitialize(&symbols);
 }
 
 }  // namespace

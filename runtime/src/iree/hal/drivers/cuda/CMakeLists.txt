@@ -77,7 +77,6 @@ iree_cc_library(
     "dynamic_symbols.h"
   TEXTUAL_HDRS
     "dynamic_symbol_tables.h"
-    "dynamic_symbol_tables_nccl.h"
   SRCS
     "cuda_headers.h"
     "dynamic_symbols.c"
