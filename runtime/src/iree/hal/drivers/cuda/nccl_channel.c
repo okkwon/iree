@@ -243,11 +243,26 @@ static iree_status_t iree_hal_cuda_nccl_submit_batch_entry(
       iree_hal_cuda_nccl_channel_cast(entry->channel);
   iree_hal_cuda_dynamic_symbols_t* syms = channel->context_wrapper->syms;
   ncclComm_t comm = iree_hal_cuda_nccl_channel_comm(entry->channel);
+  ncclDataType_t datatype;
+  IREE_RETURN_IF_ERROR(get_nccl_data_type(entry->op.element_type, &datatype));
 
   switch (entry->op.kind) {
-    case IREE_HAL_COLLECTIVE_KIND_ALL_GATHER:
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "unsupported collective kind");
+    case IREE_HAL_COLLECTIVE_KIND_ALL_GATHER: {
+      CUdeviceptr sendbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->send_binding.buffer)) +
+          entry->send_binding.offset;
+      CUdeviceptr recvbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->recv_binding.buffer)) +
+          entry->recv_binding.offset;
+      NCCL_RETURN_IF_ERROR(
+          syms,
+          ncclAllGather((const void*)sendbuff, (void*)recvbuff,
+                        entry->element_count, datatype, comm, stream),
+          "ncclAllGather");
+      break;
+    }
     case IREE_HAL_COLLECTIVE_KIND_ALL_REDUCE: {
       CUdeviceptr sendbuff =
           iree_hal_cuda_buffer_device_pointer(
@@ -257,9 +272,6 @@ static iree_status_t iree_hal_cuda_nccl_submit_batch_entry(
           iree_hal_cuda_buffer_device_pointer(
               iree_hal_buffer_allocated_buffer(entry->recv_binding.buffer)) +
           entry->recv_binding.offset;
-      ncclDataType_t datatype;
-      IREE_RETURN_IF_ERROR(
-          get_nccl_data_type(entry->op.element_type, &datatype));
       ncclRedOp_t redop;
       IREE_RETURN_IF_ERROR(get_nccl_red_type(entry->op.reduction, &redop));
       NCCL_RETURN_IF_ERROR(
@@ -269,14 +281,82 @@ static iree_status_t iree_hal_cuda_nccl_submit_batch_entry(
           "ncclAllReduce");
       break;
     }
-    case IREE_HAL_COLLECTIVE_KIND_BROADCAST:
-    case IREE_HAL_COLLECTIVE_KIND_REDUCE:
-    case IREE_HAL_COLLECTIVE_KIND_REDUCE_SCATTER:
-    case IREE_HAL_COLLECTIVE_KIND_SEND:
-    case IREE_HAL_COLLECTIVE_KIND_RECV:
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "unsupported collective kind");
-  }
+    case IREE_HAL_COLLECTIVE_KIND_BROADCAST: {
+      CUdeviceptr sendbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->send_binding.buffer)) +
+          entry->send_binding.offset;
+      CUdeviceptr recvbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->recv_binding.buffer)) +
+          entry->recv_binding.offset;
+      NCCL_RETURN_IF_ERROR(syms,
+                           ncclBroadcast((const void*)sendbuff, (void*)recvbuff,
+                                         entry->element_count, datatype,
+                                         entry->param, comm, stream),
+                           "ncclBroadcast");
+      break;
+    }
+    case IREE_HAL_COLLECTIVE_KIND_REDUCE: {
+      CUdeviceptr sendbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->send_binding.buffer)) +
+          entry->send_binding.offset;
+      CUdeviceptr recvbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->recv_binding.buffer)) +
+          entry->recv_binding.offset;
+      ncclRedOp_t redop;
+      IREE_RETURN_IF_ERROR(get_nccl_red_type(entry->op.reduction, &redop));
+      NCCL_RETURN_IF_ERROR(syms,
+                           ncclReduce((const void*)sendbuff, (void*)recvbuff,
+                                      entry->element_count, datatype, redop,
+                                      entry->param, comm, stream),
+                           "ncclReduce");
+      break;
+    }
+    case IREE_HAL_COLLECTIVE_KIND_REDUCE_SCATTER: {
+      CUdeviceptr sendbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->send_binding.buffer)) +
+          entry->send_binding.offset;
+      CUdeviceptr recvbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->recv_binding.buffer)) +
+          entry->recv_binding.offset;
+      ncclRedOp_t redop;
+      IREE_RETURN_IF_ERROR(get_nccl_red_type(entry->op.reduction, &redop));
+      NCCL_RETURN_IF_ERROR(
+          syms,
+          ncclReduceScatter((const void*)sendbuff, (void*)recvbuff,
+                            entry->element_count, datatype, redop, comm,
+                            stream),
+          "ncclReduceScatter");
+      break;
+    }
+    case IREE_HAL_COLLECTIVE_KIND_SEND: {
+      CUdeviceptr sendbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->send_binding.buffer)) +
+          entry->send_binding.offset;
+      NCCL_RETURN_IF_ERROR(syms,
+                           ncclSend((const void*)sendbuff, entry->element_count,
+                                    datatype, entry->param, comm, stream),
+                           "ncclSend");
+      break;
+    }
+    case IREE_HAL_COLLECTIVE_KIND_RECV: {
+      CUdeviceptr recvbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->recv_binding.buffer)) +
+          entry->recv_binding.offset;
+      NCCL_RETURN_IF_ERROR(syms,
+                           ncclRecv((void*)recvbuff, entry->element_count,
+                                    datatype, entry->param, comm, stream),
+                           "ncclRecv");
+      break;
+    }
+  }  // switch
   return iree_ok_status();
 }
 
