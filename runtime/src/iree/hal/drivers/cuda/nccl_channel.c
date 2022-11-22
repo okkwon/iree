@@ -5,6 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/hal/drivers/cuda/nccl_channel.h"
+
+#include <iree/base/config.h>
+#include <iree/base/status.h>
+#include <iree/hal/command_buffer.h>
+#include <iree/hal/utils/collective_batch.h>
 #if IREE_HAL_DRIVER_CUDA_NCCL
 #include <nccl.h>
 #endif
@@ -12,6 +17,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/tracing.h"
+#include "iree/hal/drivers/cuda/cuda_buffer.h"
 #include "iree/hal/drivers/cuda/status_util.h"
 
 // Returns the same value as NCCL's init.cc hashUniqueId.
@@ -162,6 +168,118 @@ ncclComm_t iree_hal_cuda_nccl_channel_comm(iree_hal_channel_t* base_channel) {
   return channel->comm;
 }
 
+static iree_status_t get_nccl_data_type(iree_hal_collective_element_type_t in,
+                                        ncclDataType_t* out) {
+  switch (in) {
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_8:
+      *out = ncclInt8;
+      break;
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_8:
+      *out = ncclUint8;
+      break;
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_16:
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "SINT16 is not supported for collective op");
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_16:
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "UINT16 is not supported for collective op");
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_32:
+      *out = ncclInt32;
+      break;
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_32:
+      *out = ncclUint32;
+      break;
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_64:
+      *out = ncclInt64;
+      break;
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_64:
+      *out = ncclUint64;
+      break;
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_FLOAT_16:
+      *out = ncclFloat16;
+      break;
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_FLOAT_32:
+      *out = ncclFloat32;
+      break;
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_FLOAT_64:
+      *out = ncclFloat64;
+      break;
+    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_BFLOAT_16:
+      *out = ncclFloat64;
+      break;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t get_nccl_red_type(iree_hal_collective_reduction_t in,
+                                       ncclRedOp_t* out) {
+  switch (in) {
+    case IREE_HAL_COLLECTIVE_REDUCTION_SUM:
+      *out = ncclSum;
+      break;
+    case IREE_HAL_COLLECTIVE_REDUCTION_PRODUCT:
+      *out = ncclProd;
+      break;
+    case IREE_HAL_COLLECTIVE_REDUCTION_MINIMUM:
+      *out = ncclMin;
+      break;
+    case IREE_HAL_COLLECTIVE_REDUCTION_MAXIMUM:
+      *out = ncclMax;
+      break;
+    case IREE_HAL_COLLECTIVE_REDUCTION_AVERAGE:
+      *out = ncclAvg;
+      break;
+  }
+
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_cuda_nccl_submit_batch_entry(
+    const iree_hal_collective_batch_entry_t* entry, CUstream stream) {
+  IREE_ASSERT_ARGUMENT(entry);
+  IREE_ASSERT_ARGUMENT(stream);
+
+  iree_hal_cuda_nccl_channel_t* channel =
+      iree_hal_cuda_nccl_channel_cast(entry->channel);
+  iree_hal_cuda_dynamic_symbols_t* syms = channel->context_wrapper->syms;
+  ncclComm_t comm = iree_hal_cuda_nccl_channel_comm(entry->channel);
+
+  switch (entry->op.kind) {
+    case IREE_HAL_COLLECTIVE_KIND_ALL_GATHER:
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "unsupported collective kind");
+    case IREE_HAL_COLLECTIVE_KIND_ALL_REDUCE: {
+      CUdeviceptr sendbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->send_binding.buffer)) +
+          entry->send_binding.offset;
+      CUdeviceptr recvbuff =
+          iree_hal_cuda_buffer_device_pointer(
+              iree_hal_buffer_allocated_buffer(entry->recv_binding.buffer)) +
+          entry->recv_binding.offset;
+      ncclDataType_t datatype;
+      IREE_RETURN_IF_ERROR(
+          get_nccl_data_type(entry->op.element_type, &datatype));
+      ncclRedOp_t redop;
+      IREE_RETURN_IF_ERROR(get_nccl_red_type(entry->op.reduction, &redop));
+      NCCL_RETURN_IF_ERROR(
+          syms,
+          ncclAllReduce((const void*)sendbuff, (void*)recvbuff,
+                        entry->element_count, datatype, redop, comm, stream),
+          "ncclAllReduce");
+      break;
+    }
+    case IREE_HAL_COLLECTIVE_KIND_BROADCAST:
+    case IREE_HAL_COLLECTIVE_KIND_REDUCE:
+    case IREE_HAL_COLLECTIVE_KIND_REDUCE_SCATTER:
+    case IREE_HAL_COLLECTIVE_KIND_SEND:
+    case IREE_HAL_COLLECTIVE_KIND_RECV:
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "unsupported collective kind");
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_cuda_nccl_submit_batch(
     iree_hal_cuda_context_wrapper_t* context,
     const iree_hal_collective_batch_t* batch, CUstream stream) {
@@ -179,9 +297,11 @@ iree_status_t iree_hal_cuda_nccl_submit_batch(
   //    ncclComm_t comm = iree_hal_cuda_nccl_channel_comm(entry->channel);
   //    syms->nccl*(comm, ...);
   //  syms->ncclGroupEnd();
-
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "NCCL submission not yet implemented");
+  NCCL_RETURN_IF_ERROR(context->syms, ncclGroupStart(), "ncclGroupStart");
+  for (IREE_HOST_SIZE_T i = 0; i < batch->count; ++i) {
+    iree_hal_cuda_nccl_submit_batch_entry(&batch->entries[i], stream);
+  }
+  return NCCL_RESULT_TO_STATUS(context->syms, ncclGroupEnd(), "ncclGroupEnd");
 }
 
 static const iree_hal_channel_vtable_t iree_hal_cuda_nccl_channel_vtable = {
