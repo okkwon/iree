@@ -122,7 +122,22 @@ static void iree_hal_cuda_nccl_channel_destroy(
   //  syms->ncclCommDestroy(channel->comm)
   // Should work the same (as we are doing a blocking teardown):
   //  syms->ncclCommDestroy(channel->comm)
-
+  NCCL_IGNORE_ERROR(channel->context_wrapper->syms,
+                    ncclCommFinalize(channel->comm));
+  ncclResult_t async_error;
+  for (;;) {
+    NCCL_IGNORE_ERROR(channel->context_wrapper->syms,
+                      ncclCommGetAsyncError(channel->comm, &async_error));
+    if (async_error == ncclInProgress) {
+      // wait for a second
+      const iree_time_t sec_in_ns = 1000000000;
+      iree_wait_until(sec_in_ns);
+    } else {
+      break;
+    }
+  }
+  NCCL_IGNORE_ERROR(channel->context_wrapper->syms,
+                    ncclCommDestroy(channel->comm));
   iree_allocator_free(host_allocator, channel);
 
   IREE_TRACE_ZONE_END(z0);
