@@ -64,7 +64,7 @@ static llvm::cl::opt<bool> clEnablePaddingLinalgOps(
     "iree-flow-enable-padding-linalg-ops",
     llvm::cl::desc("Enable padding linalg ops to an integer multiple of "
                    "flow-padding-size"),
-    llvm::cl::init(false));
+    llvm::cl::init(true));
 
 static llvm::cl::opt<bool> clEnableFusePaddingIntoLinalgConsumerOps(
     "iree-flow-enable-fuse-padding-into-linalg-consumer-ops",
@@ -75,7 +75,7 @@ static llvm::cl::opt<int> clLinalgOpsPaddingSize(
     "iree-flow-linalg-ops-padding-size",
     llvm::cl::desc("Enable padding linalg ops to an integer multiple of "
                    "flow-padding-size"),
-    llvm::cl::init(4));
+    llvm::cl::init(16));
 
 // TODO(#1159): enable by default or remove this option once it works on
 //              a broader set of programs
