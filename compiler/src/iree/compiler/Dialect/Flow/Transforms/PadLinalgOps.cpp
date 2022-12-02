@@ -23,6 +23,25 @@ namespace iree_compiler {
 namespace IREE {
 namespace Flow {
 
+static Operation *sliceTensor(Location loc, Value expanded, Value original,
+                              OpBuilder &builder) {
+  auto originalType = original.getType().cast<RankedTensorType>();
+  auto rank = originalType.getRank();
+  SmallVector<OpFoldResult> offsets(rank, builder.getI64IntegerAttr(0));
+  SmallVector<OpFoldResult> strides(rank, builder.getI64IntegerAttr(1));
+  SmallVector<OpFoldResult> sizes(rank);
+  for (int i = 0, e = rank; i < e; ++i) {
+    if (!originalType.isDynamicDim(i)) {
+      sizes[i] = builder.getI64IntegerAttr(originalType.getDimSize(i));
+    } else {
+      sizes[i] = builder.create<tensor::DimOp>(loc, original, i).getResult();
+    }
+  }
+
+  return builder.create<tensor::ExtractSliceOp>(loc, expanded, offsets, sizes,
+                                                strides);
+}
+
 static bool isSimpleTranspose(linalg::GenericOp op) {
   if (!op) return false;
   if (op.getNumDpsInputs() != 1) return false;
@@ -38,7 +57,112 @@ static bool isSimpleTranspose(linalg::GenericOp op) {
   if (!outputIndexingMap.isIdentity()) return false;
   return true;
 }
+
+static bool padTensor(Location loc, OpOperand *operand,
+                      llvm::ArrayRef<int64_t> alignments, OpBuilder &builder) {
+  Value original = operand->get();
+  auto type = original.getType().cast<RankedTensorType>();
+  ArrayRef<int64_t> shape = type.getShape();
+
+  // New dimensions.
+  SmallVector<int64_t> newStaticDims(shape.begin(), shape.end());
+  SmallVector<OpFoldResult> newPaddingSizes(shape.size(),
+                                            builder.getI64IntegerAttr(0));
+
+  // Compute padded dims.
+  bool needsPad = false;
+
+  for (int i = 0, e = shape.size(); i < e; ++i) {
+    auto inputDim = shape[i];
+    auto alignment = alignments[i];
+    assert(inputDim >= 0);
+    // Static dim.
+    if ((inputDim % alignment) == 0) {
+      newStaticDims[i] = inputDim;
+      continue;
+    }
+    int64_t alignedDim = (inputDim + (alignment - 1)) & ~(alignment - 1);
+    newStaticDims[i] = alignedDim;
+    newPaddingSizes[i] = builder.getI64IntegerAttr(alignedDim - inputDim);
+    needsPad = true;
+  }
+  if (!needsPad) return false;
+
+  auto resultType = RankedTensorType::get(newStaticDims, type.getElementType());
+  Value zeroConstant = builder.create<arith::ConstantOp>(
+      loc, builder.getZeroAttr(type.getElementType()));
+  SmallVector<OpFoldResult> zeroStaticLow(shape.size(),
+                                          builder.getI64IntegerAttr(0));
+  SmallVector<Value> nullLow;
+  Value padded = builder.create<tensor::PadOp>(loc, resultType, operand->get(),
+                                               zeroStaticLow, newPaddingSizes,
+                                               zeroConstant);
+  operand->set(padded);
+  return true;
+}
+
+static bool padLeadingDim(Location loc, OpOperand *operand, int64_t alignment,
+                          OpBuilder &builder) {
+  Value original = operand->get();
+  auto type = original.getType().cast<RankedTensorType>();
+  ArrayRef<int64_t> shape = type.getShape();
+
+  SmallVector<int64_t> alignments(shape.size(), 1);
+  alignments.back() = alignment;
+
+  return padTensor(loc, operand, alignments, builder);
+}
+
 namespace {
+/// A pattern to pad linalg to the lowest dimension.
+class PadTransposeOp : public OpInterfaceRewritePattern<linalg::LinalgOp> {
+ public:
+  PadTransposeOp(MLIRContext *context, int size, PatternBenefit benefit = 1)
+      : OpInterfaceRewritePattern(context, benefit), paddingSize(size) {}
+
+  LogicalResult matchAndRewrite(linalg::LinalgOp linalgOp,
+                                PatternRewriter &rewriter) const override {
+    if (linalgOp.getNumDpsInits() != 1) return failure();
+    if (linalgOp.getNumDpsInputs() != 1) return failure();
+    if (linalgOp.getNumParallelLoops() != linalgOp.getNumLoops())
+      return failure();
+
+    Location loc = linalgOp.getLoc();
+
+    // Check if inputs have a shaped type and padding is needed.
+    bool isPaddingNeeded = false;
+    OpOperand *operand = linalgOp.getDpsInputOperand(0);
+    auto ty = operand->get().getType().dyn_cast<RankedTensorType>();
+    if (!ty || !ty.hasStaticShape()) return failure();
+    for (int64_t shape : ty.getShape()) {
+      if (!isPaddingNeeded && shape % paddingSize != 0) isPaddingNeeded = true;
+    }
+
+    if (!isPaddingNeeded) return failure();
+
+    linalgOp.dump();
+
+    // create a new operand
+    padLeadingDim(loc, operand, paddingSize, rewriter);
+
+    OpOperand *output = linalgOp.getDpsInitOperand(0);
+    Value origOutput = output->get();
+    OpResult result = linalgOp.getOperation()->getResult(0);
+    if (padLeadingDim(loc, output, paddingSize, rewriter)) {
+      result.setType(output->get().getType());
+
+      rewriter.setInsertionPoint(linalgOp.getOperation());
+      Operation *slicedResult = sliceTensor(loc, result, origOutput, rewriter);
+      result.replaceAllUsesWith(slicedResult->getResult(0));
+    }
+
+    return success();
+  }
+
+ private:
+  int paddingSize;
+};
+
 /// A pattern to switch transpose and pad with pad and transpose when the
 /// tranpose output has an unaligned leading dimension.
 struct TransposePadToPadTransposeOp : public OpRewritePattern<tensor::PadOp> {
