@@ -10,7 +10,11 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
+#include "mlir/Dialect/Linalg/Utils/Utils.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Utils/Utils.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
@@ -19,7 +23,85 @@ namespace iree_compiler {
 namespace IREE {
 namespace Flow {
 
+static bool isSimpleTranspose(linalg::GenericOp op) {
+  if (!op) return false;
+  if (op.getNumDpsInputs() != 1) return false;
+  if (op.getNumDpsInits() != 1) return false;
+  if (!op.hasTensorSemantics()) return false;
+  if (op.getNumReductionLoops() > 0) return false;
+  auto inputOperand = op.getDpsInputOperand(0);
+  auto inputIndexMap = op.getMatchingIndexingMap(inputOperand);
+  if (!inputIndexMap.isPermutation() || inputIndexMap.isIdentity())
+    return false;
+  auto outputOperand = op.getDpsInitOperand(0);
+  auto outputIndexingMap = op.getMatchingIndexingMap(outputOperand);
+  if (!outputIndexingMap.isIdentity()) return false;
+  return true;
+}
 namespace {
+/// A pattern to switch transpose and pad with pad and transpose when the
+/// tranpose output has an unaligned leading dimension.
+struct TransposePadToPadTransposeOp : public OpRewritePattern<tensor::PadOp> {
+  using OpRewritePattern<tensor::PadOp>::OpRewritePattern;
+
+  TransposePadToPadTransposeOp(MLIRContext *context, PatternBenefit benefit = 1)
+      : OpRewritePattern(context, benefit) {}
+
+  LogicalResult matchAndRewrite(tensor::PadOp padOp,
+                                PatternRewriter &rewriter) const override {
+    if (!padOp.hasZeroLowPad())
+      return rewriter.notifyMatchFailure(padOp, "expected zero low pad");
+
+    auto genericOp = padOp.getSource().getDefiningOp<linalg::GenericOp>();
+    if (!isSimpleTranspose(genericOp)) {
+      return rewriter.notifyMatchFailure(
+          padOp, "expected source to be a simple transpose op");
+    }
+
+    // Create a new PadOp.
+
+    // Apply reverse transpose to get the low/high paddings and the new shape.
+    OpOperand *transposeInput = genericOp.getDpsInputOperand(0);
+    AffineMap indexingMap = genericOp.getMatchingIndexingMap(transposeInput);
+
+    auto oldHiPad = padOp.getMixedHighPad();
+    SmallVector<OpFoldResult> newHiPad(oldHiPad);
+    RankedTensorType oldPadType = padOp.getResultType();
+    ArrayRef<int64_t> oldPadShape = oldPadType.getShape();
+    SmallVector<int64_t> newShape(oldPadShape);
+
+    for (auto en : enumerate(indexingMap.getResults())) {
+      unsigned pos = en.value().cast<AffineDimExpr>().getPosition();
+      unsigned index = en.index();
+      newHiPad[pos] = oldHiPad[index];
+      newShape[pos] = oldPadShape[index];
+    }
+    auto newPadResultType =
+        RankedTensorType::get(newShape, oldPadType.getElementType());
+    auto newPadOp = rewriter.create<tensor::PadOp>(
+        padOp.getLoc(), newPadResultType, transposeInput->get(),
+        padOp.getMixedLowPad(), newHiPad, padOp.getConstantPaddingValue());
+
+    // Reuse the old PadOp for the init operand for the transpose.
+    auto newPadOpForInit = rewriter.create<tensor::PadOp>(
+        padOp.getLoc(), padOp.getResultType(),
+        genericOp.getDpsInitOperand(0)->get(), padOp.getMixedLowPad(),
+        padOp.getMixedHighPad(), padOp.getConstantPaddingValue());
+
+    newPadOpForInit.setOperand(0, genericOp.getDpsInitOperand(0)->get());
+
+    auto newTranspose = rewriter.create<linalg::GenericOp>(
+        padOp.getLoc(), padOp.getResultType(), newPadOp->getResult(0),
+        newPadOpForInit->getResult(0), genericOp.getIndexingMapsArray(),
+        genericOp.getIteratorTypesArray(),
+        /*bodyBuild=*/nullptr, linalg::getPrunedAttributeList(genericOp));
+    rewriter.inlineRegionBefore(genericOp.getRegion(), newTranspose.getRegion(),
+                                newTranspose.getRegion().begin());
+    rewriter.replaceOp(padOp, newTranspose->getResult(0));
+    return success();
+  }
+};
+
 /// A pattern to pad statically shaped matmul operands to the next integer
 /// multiple of padSize.
 class PadMatmulOp : public OpInterfaceRewritePattern<linalg::LinalgOp> {
@@ -163,6 +245,13 @@ class PadLinalgOpsPass : public PadLinalgOpsBase<PadLinalgOpsPass> {
     MLIRContext *context = &getContext();
     RewritePatternSet patterns(context);
     patterns.insert<PadMatmulOp>(context, paddingSize);
+    if (failed(applyPatternsAndFoldGreedily(getOperation(),
+                                            std::move(patterns)))) {
+      return signalPassFailure();
+    }
+
+    patterns.clear();
+    patterns.insert<TransposePadToPadTransposeOp>(context);
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             std::move(patterns)))) {
       return signalPassFailure();
