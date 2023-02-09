@@ -280,7 +280,9 @@ static iree_status_t iree_hal_cuda_device_create_channel(
   iree_hal_cuda_nccl_id_t id;
   if (iree_const_byte_span_is_empty(params.id)) {
     // User wants the default.
-    id = device->params.nccl_default_id;
+    iree_hal_cuda_nccl_id_t* nccl_ids =
+        iree_hal_cuda_driver_get_nccl_ids(device->driver);
+    id = nccl_ids[0];
   } else if (params.id.data_length != IREE_ARRAYSIZE(id.data)) {
     // User provided something but it's not what we expect.
     return iree_make_status(

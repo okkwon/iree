@@ -24,6 +24,11 @@ typedef enum iree_hal_cuda_command_buffer_mode_e {
   IREE_HAL_CUDA_COMMAND_BUFFER_MODE_STREAM = 1,
 } iree_hal_cuda_command_buffer_mode_t;
 
+// host string
+typedef struct {
+  char data[128];
+} iree_hal_cuda_nccl_host_t;
+
 // ncclUniqueId exposed without exporting the NCCL headers.
 typedef struct {
   char data[128];
@@ -60,10 +65,6 @@ typedef struct iree_hal_cuda_device_params_t {
   // tracing with this enabled.
   bool stream_tracing;
 
-  // Opaque NCCL ID used during channel creation when empty IDs are provided.
-  // Today this is used for all communicators created but in the future this may
-  // just be used as a default when not otherwise specified on channel creation.
-  iree_hal_cuda_nccl_id_t nccl_default_id;
   // Default base rank to use when creating collective channels.
   // This will be added to the local rank assigned to communicators when
   // IREE_HAL_CHANNEL_RANK_DEFAULT is specified on creation calls.
@@ -92,9 +93,13 @@ typedef struct iree_hal_cuda_driver_options_t {
 IREE_API_EXPORT void iree_hal_cuda_driver_options_initialize(
     iree_hal_cuda_driver_options_t* out_options);
 
+IREE_API_EXPORT iree_hal_cuda_nccl_id_t* iree_hal_cuda_driver_get_nccl_ids(
+    iree_hal_driver_t* driver);
+
 // Creates a CUDA HAL driver that manage its own CUcontext.
 //
-// |out_driver| must be released by the caller (see |iree_hal_driver_release|).
+// |out_driver| must be released by the caller (see
+// |iree_hal_driver_release|).
 IREE_API_EXPORT iree_status_t iree_hal_cuda_driver_create(
     iree_string_view_t identifier,
     const iree_hal_cuda_device_params_t* default_params,

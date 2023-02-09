@@ -33,6 +33,10 @@ typedef struct iree_hal_cuda_driver_t {
   int default_device_index;
   // CUDA symbols.
   iree_hal_cuda_dynamic_symbols_t syms;
+  // NCCL hosts for the multi-process mode.
+  iree_hal_cuda_nccl_host_t* nccl_hosts;
+  // NCCL unique IDs for the multi-process mode.
+  iree_hal_cuda_nccl_id_t* nccl_ids;
 } iree_hal_cuda_driver_t;
 
 static const iree_hal_driver_vtable_t iree_hal_cuda_driver_vtable;
@@ -49,24 +53,113 @@ IREE_API_EXPORT void iree_hal_cuda_driver_options_initialize(
   out_options->default_device_index = 0;
 }
 
-static iree_status_t iree_hal_nccl_get_unique_id_from_env(
+IREE_API_EXPORT iree_hal_cuda_nccl_id_t* iree_hal_cuda_driver_get_nccl_ids(
+    iree_hal_driver_t* driver) {
+  iree_hal_cuda_driver_t* cuda_driver = iree_hal_cuda_driver_cast(driver);
+  return cuda_driver->nccl_ids;
+}
+
+static iree_status_t iree_hal_cuda_nccl_get_hosts_from_env(
     iree_hal_cuda_driver_t* driver) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  char* nccl_comm_id_str = getenv("NCCL_COMM_ID");
-  if (!nccl_comm_id_str) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected NCCL_COMM_ID environment variable to be "
-                            "set when using the default NCCL configuration");
+  char* nccl_hosts_str = getenv("IREE_CUDA_NCCL_HOSTS");
+  iree_status_t status = iree_ok_status();
+  if (!nccl_hosts_str) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "expected IREE_CUDA_NCCL_HOSTS environment variable to be "
+        "set when using the NCCL configuration");
+  }
+  const int nprocs = driver->default_params.nccl_default_count;
+
+  // allocate storage for hosts
+  iree_hal_cuda_nccl_host_t* hosts = NULL;
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t total_size = sizeof(iree_hal_cuda_nccl_host_t) * nprocs;
+    status = iree_allocator_malloc(driver->host_allocator, total_size,
+                                   (void**)&hosts);
   }
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, NCCL_RESULT_TO_STATUS(
-              &driver->syms,
-              ncclGetUniqueId(
-                  (ncclUniqueId*)&driver->default_params.nccl_default_id),
-              "ncclGetUniqueId"));
+  if (iree_status_is_ok(status)) {
+    driver->nccl_hosts = hosts;
+
+    // parse the host strings
+    char* str = nccl_hosts_str;
+    for (int i = 0; i < nprocs; ++i) {
+      char* host_data = hosts[i].data;
+
+      if (str) {
+        for (int j = 0; j < 128; ++j) {
+          char ch = str[j];
+          if (ch == ',') {
+            str = &str[j + 1];
+            break;
+          }
+          if (ch == '\0') {
+            str = NULL;
+            break;
+          }
+          host_data[j] = str[j];
+        }
+      }
+
+      // check if there is a host string.
+      if (host_data[0] == '\0') {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "failed to read the host string for proc %d from %s", i,
+            nccl_hosts_str);
+        break;
+      }
+    }
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_nccl_get_unique_ids_from_hosts(
+    iree_hal_cuda_driver_t* driver) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  const int nprocs = driver->default_params.nccl_default_count;
+
+  // allocate storage for hosts
+  iree_hal_cuda_nccl_id_t* nccl_ids;
+  iree_host_size_t total_size = sizeof(iree_hal_cuda_nccl_id_t) * nprocs;
+  iree_status_t status = iree_allocator_malloc(driver->host_allocator,
+                                               total_size, (void**)&nccl_ids);
+
+  if (iree_status_is_ok(status)) {
+    driver->nccl_ids = nccl_ids;
+    // check if NCCL_COMM_ID is not set.
+    if (getenv("NCCL_COMM_ID")) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "NCCL_COMM_ID should not be set by users");
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    // Generate a unique ID for all hosts. This converts the host string into
+    // an NCCL unique ID. It depends on the logic of how NCCL creates a unique
+    // ID when NCCL_COMM_ID is set by users.
+    for (int i = 0; i < nprocs; ++i) {
+      const char* host_str = driver->nccl_hosts[i].data;
+      if (setenv("NCCL_COMM_ID", host_str, /*overwrite=*/1) != 0) {
+        status = iree_make_status(IREE_STATUS_INTERNAL,
+                                  "failed to set NCCL_COMM_ID=%s for proc %d",
+                                  host_str, i);
+        break;
+      }
+
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, NCCL_RESULT_TO_STATUS(
+                  &driver->syms,
+                  ncclGetUniqueId((ncclUniqueId*)&driver->nccl_ids[i]),
+                  "ncclGetUniqueId"));
+    }
+    unsetenv("NCCL_COMM_ID");
+  }
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -89,6 +182,8 @@ static iree_status_t iree_hal_cuda_driver_create_internal(
   memcpy(&driver->default_params, default_params,
          sizeof(driver->default_params));
   driver->default_device_index = options->default_device_index;
+  driver->nccl_hosts = NULL;
+  driver->nccl_ids = NULL;
 
   iree_status_t status =
       iree_hal_cuda_dynamic_symbols_initialize(host_allocator, &driver->syms);
@@ -98,8 +193,13 @@ static iree_status_t iree_hal_cuda_driver_create_internal(
       status = iree_hal_cuda_nccl_dynamic_symbols_initialize(host_allocator,
                                                              &driver->syms);
       if (iree_status_is_ok(status)) {
-        // Get a unique ID from the environmental variable.
-        status = iree_hal_nccl_get_unique_id_from_env(driver);
+        // Read the host strings from IREE_CUDA_NCCL_HOSTS
+        status = iree_hal_cuda_nccl_get_hosts_from_env(driver);
+      }
+
+      if (iree_status_is_ok(status)) {
+        // Get the unique IDs from the host strings
+        status = iree_hal_nccl_get_unique_ids_from_hosts(driver);
       }
     }
   }
@@ -118,6 +218,8 @@ static void iree_hal_cuda_driver_destroy(iree_hal_driver_t* base_driver) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_cuda_dynamic_symbols_deinitialize(&driver->syms);
+  iree_allocator_free(host_allocator, driver->nccl_hosts);
+  iree_allocator_free(host_allocator, driver->nccl_ids);
   iree_allocator_free(host_allocator, driver);
 
   IREE_TRACE_ZONE_END(z0);
