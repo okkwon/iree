@@ -1686,6 +1686,15 @@ void ChannelDefaultOp::getAsmResultNames(
 }
 
 //===----------------------------------------------------------------------===//
+// flow.channel.split
+//===----------------------------------------------------------------------===//
+
+void ChannelSplitOp::getAsmResultNames(
+    function_ref<void(Value, StringRef)> setNameFn) {
+  setNameFn(getResult(), "channel_split");
+}
+
+//===----------------------------------------------------------------------===//
 // flow.channel.rank
 //===----------------------------------------------------------------------===//
 
