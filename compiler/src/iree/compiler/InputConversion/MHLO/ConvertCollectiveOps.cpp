@@ -160,6 +160,14 @@ static LogicalResult checkCollectiveAttrs(T op, PatternRewriter &rewriter) {
   return success();
 }
 
+static Operation *handleReplicaGroups(Operation *inputChannel,
+                                      DenseIntElementsAttr replicaGroups,
+                                      bool useGlobalDeviceIds,
+                                      int64_t channelId,
+                                      PatternRewriter &rewriter) {
+  return inputChannel;
+}
+
 }  // namespace
 
 /// Converts mhlo.replica_id to flow.channel.default + flow.channel.rank.
@@ -307,8 +315,25 @@ struct AllReduceOpConversion : public OpConversionPattern<mhlo::AllReduceOp> {
     auto loc = op.getLoc();
 
     // Create a default channel.
-    auto channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(
+    Operation *channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(
         loc, /*group=*/StringAttr{});
+
+    // If a group is specified, split the default channel.
+
+    // First, convert the replica_groups into the groups. Note that
+    // `replica_groups` can be interpreted in multiple ways based on the other
+    // attributes.
+
+    // TODO(okkwon): support cross_partition and cross_replica_and_partition.
+    // For now we only support cross_replica. To handle them correctly, we need
+    // to have the number of replicas and the number of partitions in the IR.
+    int64_t channelId = 0;
+    if (op.getChannelHandleAttr()) {
+      channelId = op.getChannelHandleAttr().getHandle();
+    }
+    channel =
+        handleReplicaGroups(channel, op.getReplicaGroups(),
+                            op.getUseGlobalDeviceIds(), channelId, rewriter);
 
     // Convert mhlo reduction op into flow reduction op.
     auto reductionOpAttr =
@@ -329,7 +354,7 @@ struct AllReduceOpConversion : public OpConversionPattern<mhlo::AllReduceOp> {
                                                     inputType.getElementType());
     auto allReduceOp = rewriter.create<IREE::Flow::CollectiveAllReduceOp>(
         op.getLoc(), reductionOpAttr, elementTypeAttr, target, op.getOperand(),
-        channel);
+        channel->getResults()[0]);
     rewriter.replaceOp(op, allReduceOp.getResult());
     return success();
   }
