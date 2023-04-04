@@ -131,12 +131,6 @@ static IREE::Flow::CollectiveElementTypeAttr getCollectiveElementTypeAttr(
 
 template <typename T>
 static LogicalResult checkCollectiveAttrs(T op, PatternRewriter &rewriter) {
-  // Check there is only one group in the replica_groups
-  ShapedType replicaGroupType = op.getReplicaGroups().getType();
-  if (replicaGroupType.getRank() != 2 || replicaGroupType.getDimSize(0) != 1) {
-    return rewriter.notifyMatchFailure(op, "must have a single replica group");
-  }
-
   // Note that the channel handle attribute consists of two 64-bit values,
   // handle and type.
   int64_t handle =
