@@ -751,7 +751,7 @@ def HAL_ChannelSplitOp : HAL_Op<"channel.split", [
   let arguments = (ins
     HAL_Device:$device,
     HAL_DeviceQueueAffinity:$queue_affinity,
-    StrAttr:$groups,
+    Util_BufferType:$groups,
     HAL_Channel:$channel
   );
   let results = (outs

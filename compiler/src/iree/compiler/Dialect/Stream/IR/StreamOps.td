@@ -3360,7 +3360,7 @@ def Stream_ChannelSplitOp : Stream_PureOp<"channel.split", [
   let arguments = (ins
     OptionalAttr<Stream_AffinityAttr>:$affinity,
     StrAttr:$groups,
-    Stream_Channel:$input
+    Stream_Channel:$channel
   );
   let results = (outs
     Stream_Channel:$result
@@ -3369,7 +3369,7 @@ def Stream_ChannelSplitOp : Stream_PureOp<"channel.split", [
   let assemblyFormat = [{
     (`on` `(` $affinity^ `)`)?
     `groups` `(` $groups `)`
-    $input
+    $channel
     `:` type($result)
     attr-dict-with-keyword
   }];

@@ -1313,10 +1313,22 @@ struct ChannelSplitOpPattern
       ConversionPatternRewriter &rewriter) const override {
     auto [device, queueAffinity] =
         lookupDeviceAndQueueAffinityFor(op, rewriter);
-    StringAttr groupsAttr = adaptor.getGroupsAttr();
+    Value groups =
+        adaptor.getGroupsAttr()
+            ? rewriter
+                  .create<IREE::Util::BufferConstantOp>(
+                      op.getLoc(),
+                      /*name=*/StringAttr{}, /*value=*/adaptor.getGroupsAttr(),
+                      /*alignment=*/IntegerAttr{}, /*mime_type=*/StringAttr{})
+                  .getResult()
+            : rewriter
+                  .create<IREE::Util::NullOp>(
+                      op.getLoc(), rewriter.getType<IREE::Util::BufferType>())
+                  .getResult();
+
     rewriter.replaceOpWithNewOp<IREE::HAL::ChannelSplitOp>(
         op, rewriter.getType<IREE::HAL::ChannelType>(), device, queueAffinity,
-        groupsAttr, adaptor.getInput());
+        groups, adaptor.getChannel());
     return success();
   }
 };
