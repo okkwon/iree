@@ -285,6 +285,56 @@ struct ConvertChannelDefaultOp
   }
 };
 
+static StringAttr convertGroupsInChannelToStringAttr(
+    DenseIntElementsAttr groups) {
+  if (!groups) return StringAttr();
+
+  auto groupsType = groups.getType().cast<RankedTensorType>();
+  assert(groupsType.getRank() == 2);
+  int rows = groupsType.getShape()[0];
+  int cols = groupsType.getShape()[1];
+  auto values = groups.getValues<int64_t>();
+
+  std::string str;
+  llvm::raw_string_ostream os(str);
+  for (int i = 0; i < rows; ++i) {
+    if (i != 0) {
+      os << ",";
+    }
+    os << "(";
+    for (int j = 0; j < cols; ++j) {
+      const int index = i * cols + j;
+      int64_t value = values[index];
+      // -1 represents a null value in a group, where the group does not
+      // fully occupy the space in the row, e.g., [[0,1,2,3], [4,5,-1,-1]].
+      if (value != -1) {
+        // When there was a value before, put a comma.
+        if (j != 0) {
+          os << ",";
+        }
+        os << value;
+      }
+    }
+    os << ")";
+  }
+  return StringAttr::get(groups.getContext(), str);
+}
+
+struct ConvertChannelSplitOp
+    : public OpConversionPattern<IREE::Flow::ChannelSplitOp> {
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult matchAndRewrite(
+      IREE::Flow::ChannelSplitOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    IREE::Stream::AffinityAttr affinityAttr;
+    StringAttr groupsStrAttr =
+        convertGroupsInChannelToStringAttr(adaptor.getGroupsAttr());
+    rewriter.replaceOpWithNewOp<IREE::Stream::ChannelSplitOp>(
+        op, affinityAttr, groupsStrAttr, adaptor.getInput());
+    return success();
+  }
+};
+  
 struct ConvertChannelCountOp
     : public OpConversionPattern<IREE::Flow::ChannelCountOp> {
   using OpConversionPattern::OpConversionPattern;
@@ -756,7 +806,7 @@ void populateFlowToStreamConversionPatterns(MLIRContext *context,
               ConvertTensorStoreOp, ConvertTensorTraceOp>(typeConverter,
                                                           context);
   patterns.insert<ConvertChannelCountOp, ConvertChannelDefaultOp,
-                  ConvertChannelRankOp>(typeConverter, context);
+                  ConvertChannelRankOp, ConvertChannelSplitOp>(typeConverter, context);
   patterns
       .insert<ConvertAllGatherOp, ConvertAllReduceOp, ConvertReduceScatterOp>(
           typeConverter, context);

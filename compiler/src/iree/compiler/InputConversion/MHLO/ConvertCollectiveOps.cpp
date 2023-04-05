@@ -159,7 +159,17 @@ static Operation *handleReplicaGroups(Operation *inputChannel,
                                       bool useGlobalDeviceIds,
                                       int64_t channelId,
                                       PatternRewriter &rewriter) {
-  return inputChannel;
+  // No need to split if there is a single group.
+  ShapedType replicaGroupType = replicaGroups.getType();
+  assert(replicaGroupType.getRank() == 2);
+  if (replicaGroupType.getDimSize(0) == 1) {
+    return inputChannel;
+  }
+
+  auto loc = inputChannel->getLoc();
+  Operation *split = rewriter.create<IREE::Flow::ChannelSplitOp>(
+      loc, replicaGroups, inputChannel->getResults()[0]);
+  return split;
 }
 
 }  // namespace
