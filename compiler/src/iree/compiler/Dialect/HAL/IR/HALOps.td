@@ -752,7 +752,7 @@ def HAL_ChannelSplitOp : HAL_Op<"channel.split", [
     HAL_Device:$device,
     HAL_DeviceQueueAffinity:$queue_affinity,
     StrAttr:$groups,
-    HAL_Channel:$input
+    HAL_Channel:$channel
   );
   let results = (outs
     HAL_Channel:$result
@@ -762,7 +762,7 @@ def HAL_ChannelSplitOp : HAL_Op<"channel.split", [
     `device` `(` $device `:` type($device) `)`
     `affinity` `(` $queue_affinity `)`
     `groups` `(` $groups `)`
-    $input
+    $channel
     `:` type($result)
     attr-dict-with-keyword
   }];
