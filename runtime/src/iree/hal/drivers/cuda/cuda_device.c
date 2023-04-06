@@ -373,7 +373,6 @@ static iree_status_t iree_hal_cuda_device_create_channel(
   }
 
   if (iree_hal_cuda_nccl_id_is_empty(&id)) {
-    // TODO: maybe this is ok? a localhost alias or something?
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "no default NCCL ID specified (all zeros)");
   }
@@ -559,7 +558,6 @@ static iree_status_t iree_hal_cuda_device_create_channel_split(
   }
 #endif  // IREE_USE_MPI
   if (iree_hal_cuda_nccl_id_is_empty(&id)) {
-    // TODO: maybe this is ok? a localhost alias or something?
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "no default NCCL ID specified (all zeros)");
   }
