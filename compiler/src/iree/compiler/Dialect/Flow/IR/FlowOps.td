@@ -1585,15 +1585,16 @@ def FLOW_ChannelSplitOp : FLOW_Op<"channel.split", [
   }];
 
   let arguments = (ins
-    I64ElementsAttr:$groups,
-    FLOW_Channel:$input
+    StrAttr:$groups,
+    FLOW_Channel:$channel
   );
   let results = (outs
     FLOW_Channel:$result
   );
 
   let assemblyFormat = [{
-    $groups $input
+    `groups` `(` $groups `)`
+    $channel
     `:` type($result)
     attr-dict-with-keyword
   }];

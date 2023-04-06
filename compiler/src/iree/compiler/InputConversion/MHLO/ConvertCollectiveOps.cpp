@@ -154,6 +154,44 @@ static LogicalResult checkCollectiveAttrs(T op, PatternRewriter &rewriter) {
   return success();
 }
 
+static StringAttr convertGroupsInChannelToStringAttr(
+    DenseIntElementsAttr groups) {
+  if (!groups) return StringAttr();
+
+  auto groupsType = groups.getType().cast<RankedTensorType>();
+  assert(groupsType.getRank() == 2);
+  int rows = groupsType.getShape()[0];
+  int cols = groupsType.getShape()[1];
+  auto values = groups.getValues<int64_t>();
+
+  std::string str;
+  llvm::raw_string_ostream os(str);
+  for (int i = 0; i < rows; ++i) {
+    if (i != 0) {
+      os << ",";
+    }
+    os << "(";
+    for (int j = 0; j < cols; ++j) {
+      const int index = i * cols + j;
+      int64_t value = values[index];
+      // -1 represents a null value in a group, where the group does not
+      // fully occupy the space in the row, e.g., [[0,1,2,3], [4,5,-1,-1]].
+      if (value != -1) {
+        // When there was a value before, put a comma.
+        if (j != 0) {
+          os << ",";
+        }
+        os << value;
+      }
+    }
+    os << ")";
+  }
+  return StringAttr::get(groups.getContext(), str);
+}
+
+// TODO(okkwon): support cross_partition and cross_replica_and_partition.
+// For now we only support cross_replica. To handle them correctly, we need
+// to have the number of replicas and the number of partitions in the IR.
 static Operation *handleReplicaGroups(Operation *inputChannel,
                                       DenseIntElementsAttr replicaGroups,
                                       bool useGlobalDeviceIds,
@@ -166,9 +204,14 @@ static Operation *handleReplicaGroups(Operation *inputChannel,
     return inputChannel;
   }
 
+  // First, convert the replica_groups into the groups string. Note that
+  // `replica_groups` can be interpreted in multiple ways based on the other
+  // attributes.
+
   auto loc = inputChannel->getLoc();
+  StringAttr groups = convertGroupsInChannelToStringAttr(replicaGroups);
   Operation *split = rewriter.create<IREE::Flow::ChannelSplitOp>(
-      loc, replicaGroups, inputChannel->getResults()[0]);
+      loc, groups, inputChannel->getResults()[0]);
   return split;
 }
 
@@ -323,14 +366,6 @@ struct AllReduceOpConversion : public OpConversionPattern<mhlo::AllReduceOp> {
         loc, /*group=*/StringAttr{});
 
     // If a group is specified, split the default channel.
-
-    // First, convert the replica_groups into the groups. Note that
-    // `replica_groups` can be interpreted in multiple ways based on the other
-    // attributes.
-
-    // TODO(okkwon): support cross_partition and cross_replica_and_partition.
-    // For now we only support cross_replica. To handle them correctly, we need
-    // to have the number of replicas and the number of partitions in the IR.
     int64_t channelId = 0;
     if (op.getChannelHandleAttr()) {
       channelId = op.getChannelHandleAttr().getHandle();
