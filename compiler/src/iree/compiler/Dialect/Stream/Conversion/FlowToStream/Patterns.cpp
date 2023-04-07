@@ -279,8 +279,8 @@ struct ConvertChannelDefaultOp
       IREE::Flow::ChannelDefaultOp op, OpAdaptor adaptor,
       ConversionPatternRewriter &rewriter) const override {
     IREE::Stream::AffinityAttr affinityAttr;
-    rewriter.replaceOpWithNewOp<IREE::Stream::ChannelDefaultOp>(
-        op, adaptor.getGroupAttr(), affinityAttr);
+    rewriter.replaceOpWithNewOp<IREE::Stream::ChannelDefaultOp>(op,
+                                                                affinityAttr);
     return success();
   }
 };
@@ -297,7 +297,7 @@ struct ConvertChannelSplitOp
     return success();
   }
 };
-  
+
 struct ConvertChannelCountOp
     : public OpConversionPattern<IREE::Flow::ChannelCountOp> {
   using OpConversionPattern::OpConversionPattern;
@@ -769,7 +769,8 @@ void populateFlowToStreamConversionPatterns(MLIRContext *context,
               ConvertTensorStoreOp, ConvertTensorTraceOp>(typeConverter,
                                                           context);
   patterns.insert<ConvertChannelCountOp, ConvertChannelDefaultOp,
-                  ConvertChannelRankOp, ConvertChannelSplitOp>(typeConverter, context);
+                  ConvertChannelRankOp, ConvertChannelSplitOp>(typeConverter,
+                                                               context);
   patterns
       .insert<ConvertAllGatherOp, ConvertAllReduceOp, ConvertReduceScatterOp>(
           typeConverter, context);
