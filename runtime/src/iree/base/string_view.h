@@ -238,6 +238,19 @@ IREE_API_EXPORT bool iree_string_view_parse_hex_bytes(
 IREE_API_EXPORT iree_status_t iree_string_view_parse_device_size(
     iree_string_view_t value, iree_device_size_t* out_size);
 
+// Parses groups to find the group, the rank in the group, and the group size
+// for the input rank.
+//
+// Examples:
+//   rank 2 from "(0,1),(2,3)"       => group 1, rank 0, count 2
+//   rank 3 from "(0),(1),(3)"       => group 2, rank 0, count 1
+//   rank 1 from "(0,1,2),(3,4),(5)" => group 0, rank 1, count 3
+IREE_API_EXPORT
+bool iree_string_view_parse_collective_groups(iree_string_view_t groups,
+                                              int32_t rank, int32_t* out_group,
+                                              int32_t* out_rank,
+                                              int32_t* out_count);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
