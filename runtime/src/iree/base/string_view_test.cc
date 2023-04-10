@@ -372,6 +372,13 @@ TEST(StringViewTest, Split) {
   EXPECT_EQ(split("ax", 'x'), std::make_tuple(1, "a", ""));
   EXPECT_EQ(split("xb", 'x'), std::make_tuple(0, "", "b"));
   EXPECT_EQ(split("axbxc", 'x'), std::make_tuple(1, "a", "bxc"));
+
+  iree_string_view_t lhs;
+  iree_string_view_t rhs;
+  iree_string_view_t value = iree_make_cstring_view("axb");
+  EXPECT_EQ(iree_string_view_split(value, 'x', NULL, &rhs), -1);
+  EXPECT_EQ(iree_string_view_split(value, 'x', &lhs, NULL), -1);
+  EXPECT_EQ(iree_string_view_split(value, 'x', NULL, NULL), -1);
 }
 
 // Tests that partial returns from iree_string_view_split (only LHS or RHS) work
