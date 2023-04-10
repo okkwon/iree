@@ -262,6 +262,18 @@ bool iree_string_view_parse_collective_groups(iree_string_view_t groups,
                                               int32_t* out_rank,
                                               int32_t* out_count);
 
+// Remove the first character from |value| if the character is |c|.
+IREE_API_EXPORT
+bool iree_string_view_consume_char(iree_string_view_t* value, char c);
+
+// Remove the last character from |value| if the character is |c|.
+IREE_API_EXPORT
+bool iree_string_view_consume_rchar(iree_string_view_t* value, char c);
+
+// Count the occurence of the character |c| from |value|.
+IREE_API_EXPORT
+iree_host_size_t iree_string_view_count_char(iree_string_view_t value, char c);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

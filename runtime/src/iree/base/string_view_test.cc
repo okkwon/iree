@@ -715,4 +715,41 @@ TEST(StringViewTest, ParseCollectiveGroups) {
   EXPECT_EQ(parse("[0,1,2),(3.4,5)", 5), std::make_tuple(false, -1, -1, -1));
 }
 
+TEST(StringViewTest, ConsumeFirstChar) {
+  auto consume = [](const char* value,
+                    char c) -> std::tuple<bool, std::string> {
+    iree_string_view_t sv = iree_make_cstring_view(value);
+    bool result = iree_string_view_consume_char(&sv, c);
+    return std::make_tuple(result, ToString(sv));
+  };
+  EXPECT_EQ(consume("(abc)", '('), std::make_tuple(true, "abc)"));
+  EXPECT_EQ(consume("(abc)", 'a'), std::make_tuple(false, "(abc)"));
+  EXPECT_EQ(consume("", 'a'), std::make_tuple(false, ""));
+}
+
+TEST(StringViewTest, ConsumeLastChar) {
+  auto consume = [](const char* value,
+                    char c) -> std::tuple<bool, std::string> {
+    iree_string_view_t sv = iree_make_cstring_view(value);
+    bool result = iree_string_view_consume_rchar(&sv, c);
+    return std::make_tuple(result, ToString(sv));
+  };
+  EXPECT_EQ(consume("(abc)", ')'), std::make_tuple(true, "(abc"));
+  EXPECT_EQ(consume("(abc)", 'c'), std::make_tuple(false, "(abc)"));
+  EXPECT_EQ(consume("", 'a'), std::make_tuple(false, ""));
+}
+
+TEST(StringViewTest, CountChar) {
+  auto count = [](const char* value, char c) -> iree_host_size_t {
+    iree_host_size_t n =
+        iree_string_view_count_char(iree_make_cstring_view(value), c);
+    return n;
+  };
+  EXPECT_EQ(count("", 'x'), 0);
+  EXPECT_EQ(count("a,b", ','), 1);
+  EXPECT_EQ(count("aabbb", 'a'), 2);
+  EXPECT_EQ(count("aabbb", 'b'), 3);
+  EXPECT_EQ(count("aabbb", 'c'), 0);
+}
+
 }  // namespace

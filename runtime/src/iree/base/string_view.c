@@ -537,34 +537,38 @@ IREE_API_EXPORT iree_status_t iree_string_view_parse_device_size(
   return iree_ok_status();
 }
 
-static bool iree_string_view_consume_char(iree_string_view_t* value, char c) {
+IREE_API_EXPORT
+bool iree_string_view_consume_char(iree_string_view_t* value, char c) {
+  if (!value) {
+    return false;
+  }
   if (value->size == 0) {
     return false;
   }
-
   if (value->data[0] != c) {
     return false;
   }
-
   *value = iree_make_string_view(value->data + 1, value->size - 1);
   return true;
 }
 
-static bool iree_string_view_consume_rchar(iree_string_view_t* value, char c) {
+IREE_API_EXPORT
+bool iree_string_view_consume_rchar(iree_string_view_t* value, char c) {
+  if (!value) {
+    return false;
+  }
   if (value->size == 0) {
     return false;
   }
-
   if (value->data[value->size - 1] != c) {
     return false;
   }
-
   *value = iree_make_string_view(value->data, value->size - 1);
   return true;
 }
 
-static iree_host_size_t iree_string_view_count_char(iree_string_view_t value,
-                                                    char c) {
+IREE_API_EXPORT
+iree_host_size_t iree_string_view_count_char(iree_string_view_t value, char c) {
   iree_host_size_t count = 0;
   for (iree_host_size_t i = 0; i < value.size; ++i) {
     if (value.data[i] == c) {
