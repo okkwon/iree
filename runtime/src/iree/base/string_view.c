@@ -231,6 +231,33 @@ IREE_API_EXPORT intptr_t iree_string_view_split(iree_string_view_t value,
   return offset;
 }
 
+IREE_API_EXPORT intptr_t iree_string_view_split_after(
+    iree_string_view_t value, char split_char, iree_string_view_t* out_lhs,
+    iree_string_view_t* out_rhs) {
+  if (!out_lhs || !out_rhs) return -1;
+
+  *out_lhs = iree_string_view_empty();
+  *out_rhs = iree_string_view_empty();
+
+  if (!value.data || !value.size) {
+    return -1;
+  }
+
+  const void* first_ptr = memchr(value.data, split_char, value.size);
+  if (!first_ptr) {
+    *out_lhs = value;
+    return -1;
+  }
+  intptr_t offset = (intptr_t)((const char*)(first_ptr)-value.data) + 1;
+  out_lhs->data = value.data;
+  out_lhs->size = offset;
+  if (offset < value.size) {
+    out_rhs->data = value.data + offset;
+    out_rhs->size = value.size - offset;
+  }
+  return offset;
+}
+
 IREE_API_EXPORT void iree_string_view_replace_char(iree_string_view_t value,
                                                    char old_char,
                                                    char new_char) {
@@ -536,25 +563,6 @@ static bool iree_string_view_consume_rchar(iree_string_view_t* value, char c) {
   return true;
 }
 
-// Find the first collective group
-static bool iree_string_view_split_after(iree_string_view_t value, char c,
-                                         iree_string_view_t* lhs,
-                                         iree_string_view_t* rhs) {
-  for (iree_host_size_t i = 0; i < value.size; ++i) {
-    if (value.data[i] == c) {
-      if (i + 1 == value.size) {
-        *rhs = iree_string_view_empty();
-      } else {
-        *rhs = iree_make_string_view(value.data + i + 1, value.size - i - 1);
-      }
-      // Updating lhs after rhs allows lhs to be the pointer to value.
-      *lhs = iree_make_string_view(value.data, i + 1);
-      return true;
-    }
-  }
-  return false;
-}
-
 static iree_host_size_t iree_string_view_count_char(iree_string_view_t value,
                                                     char c) {
   iree_host_size_t count = 0;
@@ -578,7 +586,7 @@ bool iree_string_view_parse_collective_groups(iree_string_view_t groups,
   for (;; ++group) {  // Iteration for group parsing.
     // Split the groups string, e.g., "(0,1),(2,3)" into "(0,1)" and ",(2,3)".
     iree_string_view_t next = iree_string_view_empty();
-    if (!iree_string_view_split_after(curr, ')', &curr, &next)) {
+    if (iree_string_view_split_after(curr, ')', &curr, &next) == -1) {
       return false;
     }
 

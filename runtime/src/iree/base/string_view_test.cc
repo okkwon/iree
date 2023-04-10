@@ -436,6 +436,34 @@ TEST(StringViewTest, SplitReturnOnly) {
   EXPECT_EQ(split_return("axbxc", 'x'), 1);
 }
 
+TEST(StringViewTest, SplitAfter) {
+  auto split =
+      [](const char* value,
+         char split_char) -> std::tuple<intptr_t, std::string, std::string> {
+    iree_string_view_t lhs;
+    iree_string_view_t rhs;
+    intptr_t index = iree_string_view_split_after(iree_make_cstring_view(value),
+                                                  split_char, &lhs, &rhs);
+    return std::make_tuple(index, ToString(lhs), ToString(rhs));
+  };
+  EXPECT_EQ(split("", 'x'), std::make_tuple(-1, "", ""));
+  EXPECT_EQ(split(" ", 'x'), std::make_tuple(-1, " ", ""));
+  EXPECT_EQ(split("x", 'x'), std::make_tuple(1, "x", ""));
+  EXPECT_EQ(split(" x ", 'x'), std::make_tuple(2, " x", " "));
+  EXPECT_EQ(split("axb", 'x'), std::make_tuple(2, "ax", "b"));
+  EXPECT_EQ(split("axxxb", 'x'), std::make_tuple(2, "ax", "xxb"));
+  EXPECT_EQ(split("ax", 'x'), std::make_tuple(2, "ax", ""));
+  EXPECT_EQ(split("xb", 'x'), std::make_tuple(1, "x", "b"));
+  EXPECT_EQ(split("axbxc", 'x'), std::make_tuple(2, "ax", "bxc"));
+
+  iree_string_view_t lhs;
+  iree_string_view_t rhs;
+  iree_string_view_t value = iree_make_cstring_view("axb");
+  EXPECT_EQ(iree_string_view_split(value, 'x', NULL, &rhs), -1);
+  EXPECT_EQ(iree_string_view_split(value, 'x', &lhs, NULL), -1);
+  EXPECT_EQ(iree_string_view_split(value, 'x', NULL, NULL), -1);
+}
+
 TEST(StringViewTest, ReplaceChar) {
   auto replace_char = [](const char* value, char old_char, char new_char) {
     std::string value_clone(value);

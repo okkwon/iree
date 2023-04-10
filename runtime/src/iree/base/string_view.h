@@ -177,6 +177,17 @@ IREE_API_EXPORT intptr_t iree_string_view_split(iree_string_view_t value,
                                                 iree_string_view_t* out_lhs,
                                                 iree_string_view_t* out_rhs);
 
+// Split |value| into two parts after the first occurence of |c|.
+// Returns the next index of the |split_char| in the original |value| or -1 if
+// not found.
+// Note that unlike the normal split, the lhs includes the split_char. For
+// example, "axb" with 'x' generates "ax" and "b" for |out_lhs| and |out_rhs|,
+// respectively.
+
+IREE_API_EXPORT intptr_t iree_string_view_split_after(
+    iree_string_view_t value, char split_char, iree_string_view_t* out_lhs,
+    iree_string_view_t* out_rhs);
+
 // Replaces all occurrences of |old_char| with |new_char|.
 IREE_API_EXPORT void iree_string_view_replace_char(iree_string_view_t value,
                                                    char old_char,
