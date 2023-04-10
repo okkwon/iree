@@ -671,52 +671,48 @@ TEST(StringViewTest, ParseDeviceSizeInvalid) {
   EXPECT_THAT(ParseDeviceSize("abc"), StatusIs(StatusCode::kInvalidArgument));
 }
 
-bool ParseCollectiveGroups(std::string_view groups, int32_t rank,
-                           int32_t expected_group,
-                           int32_t expected_rank_in_group,
-                           int32_t expected_count_in_group) {
-  int32_t group = -1, rank_in_group = -1, count_in_group = -1;
-  bool result = iree_string_view_parse_collective_groups(
-      iree_string_view_t{groups.data(), groups.size()}, rank, &group,
-      &rank_in_group, &count_in_group);
-  return result && (group == expected_group) &&
-         (rank_in_group == expected_rank_in_group) &&
-         (count_in_group == expected_count_in_group);
-}
-
 TEST(StringViewTest, ParseCollectiveGroups) {
+  auto parse = [](const char* value,
+                  int32_t rank) -> std::tuple<bool, int32_t, int32_t, int32_t> {
+    int32_t group = -1, rank_in_group = -1, count_in_group = -1;
+    bool result = iree_string_view_parse_collective_groups(
+        iree_make_cstring_view(value), rank, &group, &rank_in_group,
+        &count_in_group);
+    return std::make_tuple(result, group, rank_in_group, count_in_group);
+  };
+
   // groups, rank, group, rank_in_group, count_in_group
-  EXPECT_TRUE(ParseCollectiveGroups("(0),(1)", 0, 0, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups("(0),(1)", 1, 1, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups("(0,1),(2,3)", 0, 0, 0, 2));
-  EXPECT_TRUE(ParseCollectiveGroups("(0,1),(2,3)", 1, 0, 1, 2));
-  EXPECT_TRUE(ParseCollectiveGroups("(0,1),(2,3)", 2, 1, 0, 2));
-  EXPECT_TRUE(ParseCollectiveGroups("(0,1),(2,3)", 3, 1, 1, 2));
-  EXPECT_TRUE(ParseCollectiveGroups("(0),(1,2)", 0, 0, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups("(0),(1,2)", 1, 1, 0, 2));
-  EXPECT_TRUE(ParseCollectiveGroups("(0),(1,2)", 2, 1, 1, 2));
+  EXPECT_EQ(parse("(0),(1)", 0), std::make_tuple(true, 0, 0, 1));
+  EXPECT_EQ(parse("(0),(1)", 1), std::make_tuple(true, 1, 0, 1));
+  EXPECT_EQ(parse("(0,1),(2,3)", 0), std::make_tuple(true, 0, 0, 2));
+  EXPECT_EQ(parse("(0,1),(2,3)", 1), std::make_tuple(true, 0, 1, 2));
+  EXPECT_EQ(parse("(0,1),(2,3)", 2), std::make_tuple(true, 1, 0, 2));
+  EXPECT_EQ(parse("(0,1),(2,3)", 3), std::make_tuple(true, 1, 1, 2));
+  EXPECT_EQ(parse("(0),(1,2)", 0), std::make_tuple(true, 0, 0, 1));
+  EXPECT_EQ(parse("(0),(1,2)", 1), std::make_tuple(true, 1, 0, 2));
+  EXPECT_EQ(parse("(0),(1,2)", 2), std::make_tuple(true, 1, 1, 2));
 
   // The parser returns early when it finds the answer in a group. IOW, It does
   // not care whether the string for the next group is malformed or not. In a
   // real situation each process would look for its rank, so it will catch the
   // error if there is any error in a group.
-  EXPECT_TRUE(ParseCollectiveGroups("(0,1)malformed", 0, 0, 0, 2));
-  EXPECT_TRUE(ParseCollectiveGroups("(0,1)malformed", 1, 0, 1, 2));
+  EXPECT_EQ(parse("(0,1)malformed", 0), std::make_tuple(true, 0, 0, 2));
+  EXPECT_EQ(parse("(0,1)malformed", 1), std::make_tuple(true, 0, 1, 2));
 
   // Test groups with whitespace until the desired rank is found.
-  EXPECT_TRUE(ParseCollectiveGroups(" (0),(1)", 1, 1, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups("( 0),(1)", 1, 1, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups("(0 ),(1)", 1, 1, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups("(0) ,(1)", 1, 1, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups("(0), (1)", 1, 1, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups("(0),( 1)", 1, 1, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups(" ( 0 ) , ( 1)", 1, 1, 0, 1));
-  EXPECT_TRUE(ParseCollectiveGroups("  (  0  )  ,  (  1)", 1, 1, 0, 1));
+  EXPECT_EQ(parse(" (0),(1)", 1), std::make_tuple(true, 1, 0, 1));
+  EXPECT_EQ(parse("( 0),(1)", 1), std::make_tuple(true, 1, 0, 1));
+  EXPECT_EQ(parse("(0 ),(1)", 1), std::make_tuple(true, 1, 0, 1));
+  EXPECT_EQ(parse("(0) ,(1)", 1), std::make_tuple(true, 1, 0, 1));
+  EXPECT_EQ(parse("(0), (1)", 1), std::make_tuple(true, 1, 0, 1));
+  EXPECT_EQ(parse("(0),( 1)", 1), std::make_tuple(true, 1, 0, 1));
+  EXPECT_EQ(parse(" ( 0 ) , ( 1)", 1), std::make_tuple(true, 1, 0, 1));
+  EXPECT_EQ(parse("  (  0  )  ,  (  1)", 1), std::make_tuple(true, 1, 0, 1));
 
   // Test malformed.
-  EXPECT_FALSE(ParseCollectiveGroups("(0,1,2),(3.4,5)", 5, 1, 2, 3));
-  EXPECT_FALSE(ParseCollectiveGroups("(0,1,2)|(3,4,5)", 5, 1, 2, 3));
-  EXPECT_FALSE(ParseCollectiveGroups("[0,1,2),(3.4,5)", 5, 1, 2, 3));
+  EXPECT_EQ(parse("(0,1,2),(_3,5)", 5), std::make_tuple(false, -1, -1, -1));
+  EXPECT_EQ(parse("(0,1,2)|(3,4,5)", 5), std::make_tuple(false, -1, -1, -1));
+  EXPECT_EQ(parse("[0,1,2),(3.4,5)", 5), std::make_tuple(false, -1, -1, -1));
 }
 
 }  // namespace
