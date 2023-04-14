@@ -454,7 +454,16 @@ struct ReduceScatterOpConversion
     auto loc = op.getLoc();
 
     // Create a default channel.
-    auto channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(loc);
+    Operation *channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(loc);
+
+    // If a group is specified, split the default channel.
+    int64_t channelId = 0;
+    if (op.getChannelHandleAttr()) {
+      channelId = op.getChannelHandleAttr().getHandle();
+    }
+    channel =
+        handleReplicaGroups(channel, op.getReplicaGroups(),
+                            op.getUseGlobalDeviceIds(), channelId, rewriter);
 
     // Get the collective element type attribute.
     auto resultType = op.getResult().getType().cast<RankedTensorType>();
@@ -497,7 +506,7 @@ struct ReduceScatterOpConversion
     Value scatterResult = rewriter
                               .create<IREE::Flow::CollectiveReduceScatterOp>(
                                   op.getLoc(), reductionOpAttr, elementTypeAttr,
-                                  target, reduceInput, channel)
+                                  target, reduceInput, channel->getResults()[0])
                               .getResult();
 
     if (scatterDim != 0) {
