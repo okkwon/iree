@@ -251,12 +251,19 @@ struct AllGatherOpConversion : public OpConversionPattern<mhlo::AllGatherOp> {
       return failure();
     }
 
-    // Currently only the default channel is used.
-
     auto loc = op.getLoc();
 
     // Create a default channel.
-    auto channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(loc);
+    Operation *channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(loc);
+
+    // If a group is specified, split the default channel.
+    int64_t channelId = 0;
+    if (op.getChannelHandleAttr()) {
+      channelId = op.getChannelHandleAttr().getHandle();
+    }
+    channel =
+        handleReplicaGroups(channel, op.getReplicaGroups(),
+                            op.getUseGlobalDeviceIds(), channelId, rewriter);
 
     // Get the collective element type attribute.
     auto resultType = op.getResult().getType().cast<RankedTensorType>();
@@ -296,11 +303,11 @@ struct AllGatherOpConversion : public OpConversionPattern<mhlo::AllGatherOp> {
     // Create an empty tensor for the result.
     Value target = rewriter.create<tensor::EmptyOp>(
         loc, gatherResultShape, resultType.getElementType());
-    Value gatherResult =
-        rewriter
-            .create<IREE::Flow::CollectiveAllGatherOp>(
-                op.getLoc(), elementTypeAttr, target, gatherInput, channel)
-            .getResult();
+    Value gatherResult = rewriter
+                             .create<IREE::Flow::CollectiveAllGatherOp>(
+                                 op.getLoc(), elementTypeAttr, target,
+                                 gatherInput, channel->getResults()[0])
+                             .getResult();
 
     if (allGatherDim != 0) {
       gatherResult = rewriter
@@ -355,7 +362,6 @@ struct AllReduceOpConversion : public OpConversionPattern<mhlo::AllReduceOp> {
       return rewriter.notifyMatchFailure(op,
                                          "the second op must be a terminator");
     }
-    // Currently only the default channel is used.
 
     auto loc = op.getLoc();
 
