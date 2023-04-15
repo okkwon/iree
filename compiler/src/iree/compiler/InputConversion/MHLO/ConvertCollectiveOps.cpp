@@ -189,29 +189,40 @@ static StringAttr convertGroupsInChannelToStringAttr(
   return StringAttr::get(groups.getContext(), str);
 }
 
-// TODO(okkwon): support cross_partition and cross_replica_and_partition.
-// For now we only support cross_replica. To handle them correctly, we need
-// to have the number of replicas and the number of partitions in the IR.
-static Operation *handleReplicaGroups(Operation *inputChannel,
-                                      DenseIntElementsAttr replicaGroups,
-                                      bool useGlobalDeviceIds,
-                                      int64_t channelId,
-                                      PatternRewriter &rewriter) {
+static Operation *createChannelWithGroupInfo(
+    Location loc, mhlo::ChannelHandleAttr channelHandleAttr,
+    DenseIntElementsAttr replicaGroups, bool useGlobalDeviceIds,
+    PatternRewriter &rewriter) {
+  // Create a default channel.
+  Operation *channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(loc);
+
+  // If a group is specified, split the default channel.
+
+  // TODO(okkwon): Convert replica_groups into flattened IDs.
+  //
+  // Once mhlo exposes `num_replicas` and `num_partitions`,
+  // use the channel ID to determine the collective operation mode, such as
+  // cross_replica, cross_partition, cross_replic_and_partition, and
+  // flattend_ids. Currently, we only supports the flanttend_ids mode.
+  //
+  // int64_t channelId = 0;
+  // if (channelHandleAttr) {
+  //   channelId = channelHandleAttr.getHandle();
+  // }
+
   // No need to split if there is a single group.
   ShapedType replicaGroupType = replicaGroups.getType();
   assert(replicaGroupType.getRank() == 2);
   if (replicaGroupType.getDimSize(0) == 1) {
-    return inputChannel;
+    return channel;
   }
 
   // First, convert the replica_groups into the groups string. Note that
   // `replica_groups` can be interpreted in multiple ways based on the other
   // attributes.
-
-  auto loc = inputChannel->getLoc();
   StringAttr groups = convertGroupsInChannelToStringAttr(replicaGroups);
   Operation *split = rewriter.create<IREE::Flow::ChannelSplitOp>(
-      loc, groups, inputChannel->getResults()[0]);
+      loc, groups, channel->getResults()[0]);
   return split;
 }
 
@@ -253,17 +264,10 @@ struct AllGatherOpConversion : public OpConversionPattern<mhlo::AllGatherOp> {
 
     auto loc = op.getLoc();
 
-    // Create a default channel.
-    Operation *channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(loc);
-
-    // If a group is specified, split the default channel.
-    int64_t channelId = 0;
-    if (op.getChannelHandleAttr()) {
-      channelId = op.getChannelHandleAttr().getHandle();
-    }
-    channel =
-        handleReplicaGroups(channel, op.getReplicaGroups(),
-                            op.getUseGlobalDeviceIds(), channelId, rewriter);
+    // Create a channel.
+    Operation *channel = createChannelWithGroupInfo(
+        loc, op.getChannelHandleAttr(), op.getReplicaGroups(),
+        op.getUseGlobalDeviceIds(), rewriter);
 
     // Get the collective element type attribute.
     auto resultType = op.getResult().getType().cast<RankedTensorType>();
@@ -365,17 +369,10 @@ struct AllReduceOpConversion : public OpConversionPattern<mhlo::AllReduceOp> {
 
     auto loc = op.getLoc();
 
-    // Create a default channel.
-    Operation *channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(loc);
-
-    // If a group is specified, split the default channel.
-    int64_t channelId = 0;
-    if (op.getChannelHandleAttr()) {
-      channelId = op.getChannelHandleAttr().getHandle();
-    }
-    channel =
-        handleReplicaGroups(channel, op.getReplicaGroups(),
-                            op.getUseGlobalDeviceIds(), channelId, rewriter);
+    // Create a channel.
+    Operation *channel = createChannelWithGroupInfo(
+        loc, op.getChannelHandleAttr(), op.getReplicaGroups(),
+        op.getUseGlobalDeviceIds(), rewriter);
 
     // Convert mhlo reduction op into flow reduction op.
     auto reductionOpAttr =
@@ -453,17 +450,10 @@ struct ReduceScatterOpConversion
 
     auto loc = op.getLoc();
 
-    // Create a default channel.
-    Operation *channel = rewriter.create<IREE::Flow::ChannelDefaultOp>(loc);
-
-    // If a group is specified, split the default channel.
-    int64_t channelId = 0;
-    if (op.getChannelHandleAttr()) {
-      channelId = op.getChannelHandleAttr().getHandle();
-    }
-    channel =
-        handleReplicaGroups(channel, op.getReplicaGroups(),
-                            op.getUseGlobalDeviceIds(), channelId, rewriter);
+    // Create a channel.
+    Operation *channel = createChannelWithGroupInfo(
+        loc, op.getChannelHandleAttr(), op.getReplicaGroups(),
+        op.getUseGlobalDeviceIds(), rewriter);
 
     // Get the collective element type attribute.
     auto resultType = op.getResult().getType().cast<RankedTensorType>();
