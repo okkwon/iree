@@ -29,9 +29,6 @@
 #include "iree/hal/drivers/cuda/tracing.h"
 #include "iree/hal/utils/buffer_transfer.h"
 #include "iree/hal/utils/deferred_command_buffer.h"
-#if IREE_USE_MPI
-#include "mpi.h"
-#endif  // IREE_USE_MPI
 
 //===----------------------------------------------------------------------===//
 // iree_hal_cuda_device_t
@@ -502,61 +499,19 @@ static iree_status_t iree_hal_cuda_device_create_channel_split(
   iree_hal_cuda_nccl_id_t id;
   memset(&id, 0, sizeof(id));
 
-  // Create a unique ID if my new rank is 0.
+  // Create a unique ID if the new rank is a root of a group.
   if (rank_in_group == 0) {
-    iree_status_t status = iree_hal_cuda_nccl_get_unique_id(base_device, &id);
-    if (!iree_status_is_ok(status)) {
-      return iree_make_status(IREE_STATUS_INTERNAL, "cannot get unique ID");
-    }
+    IREE_RETURN_IF_ERROR(iree_hal_cuda_nccl_get_unique_id_from_context(
+                             &device->context_wrapper, &id),
+                         "bootstrapping NCCL root for group");
   }
 
-  // Exchange the unique ID.
-#if IREE_USE_MPI
-  MPI_Comm group_comm;
-  // TODO(okkwon): Strictly speaking, the input communicator should be
-  // obtained from the input channel instead of using MPI_COMM_WORLD. This
-  // would need to put the new MPI comm in the iree_hal_cuda_nccl_channel_t.
-  // This works for the stablehlo collective ops since the groups are always
-  // made in the global channel scope.
-  MPI_Comm input_mpi_comm = MPI_COMM_WORLD;
-  int mpi_status =
-      MPI_Comm_split(input_mpi_comm, group, rank_in_group, &group_comm);
-  if (mpi_status != MPI_SUCCESS) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "MPI_Comm_split() returned %d", mpi_status);
-  }
-  mpi_status = MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, group_comm);
-  if (mpi_status != MPI_SUCCESS) {
-    return iree_make_status(IREE_STATUS_INTERNAL, "MPI_Bcast() returned %d",
-                            mpi_status);
-  }
-  mpi_status = MPI_Comm_free(&group_comm);
-  if (mpi_status != MPI_SUCCESS) {
-    return iree_make_status(IREE_STATUS_INTERNAL, "MPI_Comm_free() returned %d",
-                            mpi_status);
-  }
-#else
-  if (device->params.channel_provider.query_group_params) {
-    iree_hal_channel_params_t params = {
-        .flags = IREE_HAL_CHANNEL_FLAG_NONE,
-        .id = iree_make_const_byte_span(&id, sizeof(id)),
-        .group = groups,
-        .rank = rank_in_group,
-        .count = count_in_group};
+  IREE_RETURN_IF_ERROR(
+      iree_hal_channel_provider_exchange_id_for_group(
+          device->channel_provider, iree_make_byte_span((void*)&id, sizeof(id)),
+          group, rank_in_group, count_in_group),
+      "exchanging NCCL ID for group");
 
-    IREE_TRACE_ZONE_BEGIN_NAMED(z0,
-                                "iree_hal_channel_provider_query_group_params");
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        device->params.channel_provider.query_group_params(
-            device->params.channel_provider.self, base_device, queue_affinity,
-            iree_make_byte_span((void*)&id, sizeof(id)), &params));
-    IREE_TRACE_ZONE_END(z0);
-  } else {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "undefined cahnnal_provider");
-  }
-#endif  // IREE_USE_MPI
   if (iree_hal_cuda_nccl_id_is_empty(&id)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "no default NCCL ID specified (all zeros)");
