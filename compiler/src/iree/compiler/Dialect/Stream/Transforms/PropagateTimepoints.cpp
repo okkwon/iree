@@ -381,6 +381,22 @@ static bool isPublicOrExternal(CallableOpInterface callableOp) {
   return false;
 }
 
+static SmallVector<unsigned> getResourceTypeIndices(TypeRange types) {
+  if (types.empty())
+    return {};
+
+  SmallVector<unsigned> indexes;
+  indexes.reserve(types.size());
+  unsigned i = 0;
+  for (auto type : types) {
+    if (isResourceType(type)) {
+      indexes.push_back(i);
+    }
+    ++i;
+  }
+  return indexes;
+}
+
 // Inserts awaits on resource arguments.
 // Requires that the ExpandCallOp/ExpandReturnOp patterns handle migrating the
 // await.
@@ -404,6 +420,19 @@ static void expandFuncOp(mlir::func::FuncOp op, ExpandedGlobalMap &globalMap,
     auto newType = FunctionType::get(op.getContext(), inputTypes, resultTypes);
     if (newType != oldType) {
       op.setType(newType);
+
+      auto oldResourceLocs = getResourceTypeIndices(oldType.getInputs());
+      auto newResourceLocs = getResourceTypeIndices(newType.getInputs());
+
+      assert(oldResourceLocs.size() == newResourceLocs.size());
+      for (int i = oldResourceLocs.size() - 1; i >= 0; --i) {
+        auto attrDict = op.getArgAttrDict(oldResourceLocs[i]);
+        if (!attrDict)
+          continue;
+
+        op.setArgAttrs(newResourceLocs[i], attrDict);
+        op.setArgAttrs(oldResourceLocs[i], ArrayRef<NamedAttribute>());
+      }
     }
   }
   expandRegion(op.getRegion(), canModifyEntryBlock, globalMap,
