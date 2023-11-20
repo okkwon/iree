@@ -63,6 +63,20 @@ struct FuncOpSignatureConversion
       return failure();
     }
 
+    // Remap the attributes.
+    if (auto argAttrs = funcOp.getArgAttrs()) {
+      newFuncOp.removeArgAttrsAttr();
+      for (unsigned i = 0, e = funcOp.getNumArguments(); i != e; ++i) {
+        auto attrDict = funcOp.getArgAttrDict(i);
+        if (!attrDict)
+          continue;
+
+        auto inputMapping = newSignature.getInputMapping(i);
+        if (!inputMapping)
+          continue;
+        newFuncOp.setArgAttrs((*inputMapping).inputNo, attrDict);
+      }
+    }
     rewriter.eraseOp(funcOp);
     return success();
   }
