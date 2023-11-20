@@ -165,6 +165,9 @@ static FuncAnalysis analyzeFuncOp(func::FuncOp funcOp, Explorer &explorer) {
 
   // Walk callee arguments.
   for (auto [i, value] : llvm::enumerate(funcOp.getArguments())) {
+    // When an argument is known to be used as output, do not drop.
+    if (funcOp.getArgAttr(i, "iree.abi.output"))
+      continue;
     if (value.use_empty())
       analysis.calleeUsedArgs.reset(i);
   }
