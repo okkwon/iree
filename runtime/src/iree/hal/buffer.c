@@ -598,7 +598,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_fill(
     return iree_ok_status();  // No-op.
   }
 
-  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_BEGIN_MINIMAL(z0);
   iree_hal_buffer_mapping_t target_mapping = {{0}};
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
@@ -611,7 +611,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_fill(
   if (IREE_UNLIKELY((byte_offset % pattern_length) != 0) ||
       IREE_UNLIKELY((byte_length % pattern_length) != 0)) {
     iree_status_ignore(iree_hal_buffer_unmap_range(&target_mapping));
-    IREE_TRACE_ZONE_END(z0);
+    IREE_TRACE_ZONE_END_MINIMAL(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "attempting to fill a range with %" PRIhsz
                             " byte values "
@@ -668,7 +668,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_fill(
 
   status =
       iree_status_join(status, iree_hal_buffer_unmap_range(&target_mapping));
-  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_ZONE_END_MINIMAL(z0);
   return status;
 }
 
@@ -681,10 +681,10 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_read(
   IREE_ASSERT_ARGUMENT(source_buffer);
   IREE_ASSERT_ARGUMENT(target_buffer);
 
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, data_length);
+  IREE_TRACE_ZONE_BEGIN_MINIMAL(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64_MINIMAL(z0, data_length);
   iree_hal_buffer_mapping_t source_mapping = {{0}};
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+  IREE_RETURN_AND_END_ZONE_IF_ERROR_MINIMAL(
       z0, iree_hal_buffer_map_range(source_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
                                     IREE_HAL_MEMORY_ACCESS_READ, source_offset,
                                     data_length, &source_mapping));
@@ -692,7 +692,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_read(
   memcpy(target_buffer, source_mapping.contents.data, data_length);
 
   iree_hal_buffer_unmap_range(&source_mapping);
-  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_ZONE_END_MINIMAL(z0);
   return iree_ok_status();
 }
 
@@ -705,10 +705,10 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_write(
   IREE_ASSERT_ARGUMENT(target_buffer);
   IREE_ASSERT_ARGUMENT(source_buffer);
 
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, data_length);
+  IREE_TRACE_ZONE_BEGIN_MINIMAL(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64_MINIMAL(z0, data_length);
   iree_hal_buffer_mapping_t target_mapping;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+  IREE_RETURN_AND_END_ZONE_IF_ERROR_MINIMAL(
       z0,
       iree_hal_buffer_map_range(target_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
                                 IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE,
@@ -724,7 +724,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_write(
   }
 
   iree_hal_buffer_unmap_range(&target_mapping);
-  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_ZONE_END_MINIMAL(z0);
   return status;
 }
 
@@ -748,12 +748,12 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_copy(
         "source and target ranges must not overlap within the same buffer");
   }
 
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, data_length);
+  IREE_TRACE_ZONE_BEGIN_MINIMAL(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64_MINIMAL(z0, data_length);
 
   // Map source, which may have IREE_WHOLE_BUFFER length.
   iree_hal_buffer_mapping_t source_mapping;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+  IREE_RETURN_AND_END_ZONE_IF_ERROR_MINIMAL(
       z0, iree_hal_buffer_map_range(source_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
                                     IREE_HAL_MEMORY_ACCESS_READ, source_offset,
                                     data_length, &source_mapping));
@@ -766,7 +766,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_copy(
                                 target_offset, data_length, &target_mapping);
   if (!iree_status_is_ok(status)) {
     iree_hal_buffer_unmap_range(&source_mapping);
-    IREE_TRACE_ZONE_END(z0);
+    IREE_TRACE_ZONE_END_MINIMAL(z0);
     return status;
   }
 
@@ -787,7 +787,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_copy(
   // bail but we need to have mapped to resolve IREE_WHOLE_BUFFERs that may
   // result in zero lengths.
   if (IREE_UNLIKELY(adjusted_data_length == 0)) {
-    IREE_TRACE_ZONE_END(z0);
+    IREE_TRACE_ZONE_END_MINIMAL(z0);
     return iree_ok_status();
   }
 
@@ -802,7 +802,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_copy(
 
   iree_hal_buffer_unmap_range(&source_mapping);
   iree_hal_buffer_unmap_range(&target_mapping);
-  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_ZONE_END_MINIMAL(z0);
   return status;
 }
 

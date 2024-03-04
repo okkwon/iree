@@ -54,7 +54,7 @@ option(IREE_ENABLE_RENDERDOC_PROFILING "Enables profiling HAL devices with the R
 option(IREE_ENABLE_THREADING "Builds IREE in with thread library support." ON)
 option(IREE_ENABLE_CLANG_TIDY "Builds IREE in with clang tidy enabled on IREE's libraries." OFF)
 
-set(IREE_TRACING_PROVIDER_DEFAULT "tracy" CACHE STRING "Default tracing implementation.")
+set(IREE_TRACING_PROVIDER_DEFAULT "tracy_minimal" CACHE STRING "Default tracing implementation.")
 set(IREE_TRACING_PROVIDER ${IREE_TRACING_PROVIDER_DEFAULT} CACHE STRING "Chooses which built-in tracing implementation is used when tracing is enabled.")
 set(IREE_TRACING_PROVIDER_H "" CACHE STRING "Header file for custom tracing providers.")
 set(IREE_TRACING_MODE_DEFAULT "2" CACHE STRING "Default tracing feature/verbosity mode. See iree/base/tracing.h for more.")

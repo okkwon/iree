@@ -264,6 +264,13 @@ enum {
 // Appends an int64_t value to the parent zone. May be called multiple times.
 #define IREE_TRACE_ZONE_APPEND_VALUE_I64(zone_id, value)
 
+#define IREE_TRACE_ZONE_BEGIN_MINIMAL(zone_id) IREE_TRACE_ZONE_BEGIN(zone_id)
+#define IREE_TRACE_ZONE_END_MINIMAL(zone_id) IREE_TRACE_ZONE_END(zone_id)
+#define IREE_RETURN_AND_END_ZONE_IF_ERROR_MINIMAL(zone_id, ...) \
+  IREE_RETURN_IF_ERROR(__VA_ARGS__)
+#define IREE_TRACE_ZONE_APPEND_VALUE_I64_MINIMAL(zone_id, value) \
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(zone_id, value)
+
 // Appends a string value to the parent zone. May be called multiple times.
 // The provided NUL-terminated C string or string view will be copied into the
 // trace buffer.

@@ -527,8 +527,8 @@ static iree_zone_id_t iree_vm_stack_trace_function_zone_begin(
   if (frame_type != IREE_VM_STACK_FRAME_NATIVE) {
     // TODO(benvanik): cache source location and query from module.
     iree_string_view_t function_name = iree_vm_function_name(function);
-    IREE_TRACE_ZONE_BEGIN_NAMED_DYNAMIC(z0, function_name.data,
-                                        function_name.size);
+    IREE_TRACE_ZONE_BEGIN_NAMED_DYNAMIC_MINIMAL(z0, function_name.data,
+                                                function_name.size);
     return z0;
   } else {
     return 0;
@@ -589,8 +589,8 @@ IREE_API_EXPORT iree_status_t iree_vm_stack_function_enter(
     frame_header->trace_zone =
         iree_vm_stack_trace_function_zone_begin(frame_type, function);
     if (frame_header->trace_zone) {
-      IREE_TRACE_ZONE_APPEND_VALUE_I64(frame_header->trace_zone,
-                                       (uint64_t)stack);
+      IREE_TRACE_ZONE_APPEND_VALUE_I64_MINIMAL(frame_header->trace_zone,
+                                               (uint64_t)stack);
     }
   });
 
@@ -612,7 +612,7 @@ iree_vm_stack_function_leave(iree_vm_stack_t* stack) {
 
   IREE_TRACE({
     if (stack->top->trace_zone) {
-      IREE_TRACE_ZONE_END(stack->top->trace_zone);
+      IREE_TRACE_ZONE_END_MINIMAL(stack->top->trace_zone);
     }
   });
 

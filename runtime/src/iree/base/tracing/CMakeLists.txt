@@ -40,6 +40,22 @@ elseif(${IREE_TRACING_PROVIDER} STREQUAL "tracy")
       "IREE_TRACING_MODE=${IREE_TRACING_MODE}"
     PUBLIC
   )
+elseif(${IREE_TRACING_PROVIDER} STREQUAL "tracy_minimal")
+  iree_cc_library(
+    NAME
+      provider
+    HDRS
+      "tracy_minimal.h"
+    SRCS
+      "tracy.cc"
+    DEPS
+      iree::base::core_headers
+      tracy_client::runtime
+    DEFINES
+      "IREE_TRACING_PROVIDER_H=\"iree/base/tracing/tracy_minimal.h\""
+      "IREE_TRACING_MODE=${IREE_TRACING_MODE}"
+    PUBLIC
+  )
 else()
   # Add the dep so that the user-provided provider is linked in.
   # The user will also need to have set a header to include via

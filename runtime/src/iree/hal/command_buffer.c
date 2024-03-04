@@ -555,9 +555,9 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch(
     // the executable/etc could be bogus but that's fine.
     return iree_ok_status();
   }
-  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_BEGIN_MINIMAL(z0);
   IF_VALIDATING(command_buffer, {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+    IREE_RETURN_AND_END_ZONE_IF_ERROR_MINIMAL(
         z0, iree_hal_command_buffer_dispatch_validation(
                 command_buffer, VALIDATION_STATE(command_buffer), executable,
                 entry_point, workgroup_x, workgroup_y, workgroup_z));
@@ -575,13 +575,14 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch(
     int xyz_string_length =
         snprintf(xyz_string, IREE_ARRAYSIZE(xyz_string), "%ux%ux%u",
                  workgroup_x, workgroup_y, workgroup_z);
-    IREE_TRACE_ZONE_APPEND_TEXT_STRING_VIEW(z0, xyz_string, xyz_string_length);
+    IREE_TRACE_ZONE_APPEND_TEXT_STRING_VIEW_MINIMAL(z0, xyz_string,
+                                                    xyz_string_length);
   });
 #endif  // IREE_HAL_VERBOSE_TRACING_ENABLE
   iree_status_t status = _VTABLE_DISPATCH(command_buffer, dispatch)(
       command_buffer, executable, entry_point, workgroup_x, workgroup_y,
       workgroup_z);
-  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_ZONE_END_MINIMAL(z0);
   return status;
 }
 
@@ -593,9 +594,9 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch_indirect(
   IREE_ASSERT_ARGUMENT(command_buffer);
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(workgroups_buffer);
-  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_BEGIN_MINIMAL(z0);
   IF_VALIDATING(command_buffer, {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+    IREE_RETURN_AND_END_ZONE_IF_ERROR_MINIMAL(
         z0, iree_hal_command_buffer_dispatch_indirect_validation(
                 command_buffer, VALIDATION_STATE(command_buffer), executable,
                 entry_point, workgroups_buffer, workgroups_offset));
@@ -603,7 +604,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch_indirect(
   iree_status_t status = _VTABLE_DISPATCH(command_buffer, dispatch_indirect)(
       command_buffer, executable, entry_point, workgroups_buffer,
       workgroups_offset);
-  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_ZONE_END_MINIMAL(z0);
   return status;
 }
 

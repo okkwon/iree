@@ -197,6 +197,7 @@ iree_status_t iree_hal_executable_plugin_initialize(
     IREE_TRACE({
       const iree_hal_executable_plugin_header_t* header =
           out_base_plugin->library.v0->header;
+      (void)header;
       IREE_TRACE_ZONE_APPEND_TEXT(z0, header->name);
       IREE_TRACE_ZONE_APPEND_TEXT(z0, header->description);
     });
