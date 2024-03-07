@@ -518,22 +518,35 @@ static uint32_t getFlagForRole(IREE::LinalgExt::EncodingRole role) {
   }
 }
 
+static const char *getQueryTileSizeUKernelName(int64_t rank) {
+  if (rank == 1) {
+    return "query_tile_sizes.1d";
+  } else {
+    assert(rank == 2);
+    return "query_tile_sizes.2d";
+  }
+}
+
 static FailureOr<IREE::Codegen::UKernelOpInterface>
 matchDAGForUKernel(RewriterBase &rewriter, IREE::Codegen::QueryTileSizesOp op,
                    bool /*skipIntermediateRoundings*/) {
-  auto targetAttr = IREE::HAL::ExecutableTargetAttr::lookup(op);
-  const char ukernelName[] = "query_tile_sizes.2d";
-  if (!hasUkernel(targetAttr, ukernelName)) {
-    return failure();
-  }
   auto tensorType = op.getTensorType().dyn_cast<RankedTensorType>();
   if (!tensorType) {
     return rewriter.notifyMatchFailure(op,
                                        "need a ranked tensor type attribute");
   }
-  if (tensorType.getRank() != 2) {
-    return rewriter.notifyMatchFailure(op, "only the 2D case is implemented");
+  const int64_t rank = tensorType.getRank();
+  if (rank != 2 && rank != 1) {
+    return rewriter.notifyMatchFailure(
+        op, "only the 2D and 1D cases are implemented");
   }
+
+  auto ukernelName = getQueryTileSizeUKernelName(rank);
+  auto targetAttr = IREE::HAL::ExecutableTargetAttr::lookup(op);
+  if (!hasUkernel(targetAttr, ukernelName)) {
+    return failure();
+  }
+
   auto encoding = tensorType.getEncoding()
                       .dyn_cast_or_null<IREE::LinalgExt::EncodingAttr>();
   if (!encoding) {

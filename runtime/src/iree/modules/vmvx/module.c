@@ -703,6 +703,25 @@ IREE_VMVX_ABI_EXPORT(iree_vmvx_unpack, unpack, v) {
 //===----------------------------------------------------------------------===//
 // Exported query_tile_sizes function definitions
 //===----------------------------------------------------------------------===//
+IREE_VMVX_ABI_FIXED_STRUCT(query_tile_sizes_1d, Ii, {
+  int64_t size0;
+  uint32_t flags;
+});
+IREE_VMVX_ABI_DEFINE_SHIM(query_tile_sizes_1d, I);
+
+IREE_VMVX_ABI_EXPORT(iree_vmvx_query_tile_sizes_1d, query_tile_sizes_1d, I) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_uk_query_tile_sizes_1d_params_t ukernel_params = {
+      .size0 = args->size0,
+      .flags = args->flags,
+      .cpu_data = (const iree_uk_uint64_t*)iree_cpu_data_fields(),
+  };
+  iree_uk_query_tile_sizes_1d_out_params_t ukernel_out_params;
+  iree_uk_query_tile_sizes_1d(&ukernel_params, &ukernel_out_params);
+  rets->i0 = ukernel_out_params.tile_size0;
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
 
 IREE_VMVX_ABI_FIXED_STRUCT(query_tile_sizes_2d, IIi, {
   int64_t size0;

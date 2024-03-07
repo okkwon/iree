@@ -480,6 +480,10 @@ vm.import private @unpack(
 //==============================================================================
 // query_tile_size ops
 //==============================================================================
+vm.import private @query_tile_sizes.1d(
+  %size0 : i64,
+  %flags : i32
+) -> i64
 
 vm.import private @query_tile_sizes.2d(
   %size0 : i64,

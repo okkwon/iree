@@ -14,6 +14,20 @@
 // forcing deferral of tile-size selection to runtime.
 
 // Parameters for a query_tile_sizes operation.
+typedef struct iree_uk_query_tile_sizes_1d_params_t {
+  iree_uk_uint32_t flags;
+  iree_uk_index_t size0;
+  const iree_uk_uint64_t* cpu_data;
+} iree_uk_query_tile_sizes_1d_params_t;
+
+typedef struct iree_uk_query_tile_sizes_1d_out_params_t {
+  iree_uk_index_t tile_size0;
+} iree_uk_query_tile_sizes_1d_out_params_t;
+
+IREE_UK_EXPORT void iree_uk_query_tile_sizes_1d(
+    const iree_uk_query_tile_sizes_1d_params_t* params,
+    iree_uk_query_tile_sizes_1d_out_params_t* out_params);
+
 typedef struct iree_uk_query_tile_sizes_2d_params_t {
   iree_uk_uint32_t flags;
   iree_uk_index_t size0;
