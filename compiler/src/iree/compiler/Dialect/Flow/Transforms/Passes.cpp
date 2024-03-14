@@ -116,6 +116,11 @@ static llvm::cl::opt<bool> clZeroFillEmptyTensors(
         "Zero fill empty tensors instead of leaving them uninitialized."),
     llvm::cl::init(false));
 
+static llvm::cl::opt<bool>
+    clDisableFusionOfTensors("iree-flow-disable-fusion-of-tensors",
+                             llvm::cl::desc("Disable FusionOfTensors pass"),
+                             llvm::cl::init(false));
+
 namespace mlir::iree_compiler::IREE::Flow {
 
 using FunctionLikeNest =
@@ -143,12 +148,17 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
       .addPass(createInterchangeGenericOpsPass)
       .addPass(memref::createResolveShapedTypeResultDimsPass)
       .addPass(mlir::createCanonicalizerPass)
-      .addPass(mlir::createCSEPass)
-      // Elementwise fusion.
-      .addPass([]() {
-        return createFusionOfTensorOpsPass(
-            clEnableFuseMultiUse, clEnableElementWiseFuseMultiReduction);
-      })
+      .addPass(mlir::createCSEPass);
+
+  if (!clDisableFusionOfTensors) {
+    // Elementwise fusion.
+    FunctionLikeNest(passManager).addPass([]() {
+      return createFusionOfTensorOpsPass(clEnableFuseMultiUse,
+                                         clEnableElementWiseFuseMultiReduction);
+    });
+  }
+
+  FunctionLikeNest(passManager)
       .addPredicatedPass(clDetensoring,
                          [&]() { return mlir::createLinalgDetensorizePass(); })
       .addPass(mlir::createCanonicalizerPass)
