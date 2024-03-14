@@ -155,6 +155,38 @@ resolveBufferDescriptorForAllocation(memref::AllocaOp alloca,
   return resultDescriptor;
 }
 
+static FailureOr<DescriptorInfo> resolveBufferDescriptorForReinterpretCast(
+    memref::ReinterpretCastOp cast, RewriterBase &rewriter, Location loc) {
+  DescriptorInfo resultDescriptor;
+
+  // Replace the op with values:
+  //   base_buffer: The subspan result
+  //   offset: byte offset from subspan divided by element type size
+  //   sizes: static and dynamic sizes from the subspan
+  //   strides: identity strides
+  auto memRefType = llvm::cast<MemRefType>(cast.getResult().getType());
+  int rank = memRefType.getRank();
+
+  // Compute sizes.
+  auto dynamicDimIt = cast.getDynamicSizes().begin();
+  for (int i = 0; i < rank; ++i) {
+    if (memRefType.isDynamicDim(i)) {
+      resultDescriptor.sizes.push_back(*dynamicDimIt);
+      dynamicDimIt++;
+    } else {
+      resultDescriptor.sizes.push_back(
+          rewriter.getIndexAttr(memRefType.getDimSize(i)));
+    }
+  }
+
+  // Strides (just creates identity strides).
+  resultDescriptor.strides =
+      getStridesFromSizes(rewriter, loc, resultDescriptor.sizes);
+
+  resultDescriptor.offset = rewriter.getIndexAttr(0);
+  return resultDescriptor;
+}
+
 static FailureOr<DescriptorInfo>
 resolveBufferDescriptorForGetGlobalOp(memref::GetGlobalOp global,
                                       RewriterBase &rewriter, Location loc) {
@@ -367,6 +399,39 @@ struct FromAllocation : public OpRewritePattern<GetBufferDescriptorOp> {
   }
 };
 
+struct FromReinterpretCast : public OpRewritePattern<GetBufferDescriptorOp> {
+  using OpRewritePattern<GetBufferDescriptorOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(GetBufferDescriptorOp op,
+                                PatternRewriter &rewriter) const override {
+    auto cast =
+        op.getSource().template getDefiningOp<memref::ReinterpretCastOp>();
+    if (!cast)
+      return failure();
+    auto memRefType = llvm::cast<MemRefType>(cast.getResult().getType());
+    if (!memRefType.getLayout().isIdentity()) {
+      return rewriter.notifyMatchFailure(op, "not identity cast");
+    }
+
+    auto loc = op.getLoc();
+    FailureOr<DescriptorInfo> resultDescriptor =
+        resolveBufferDescriptorForReinterpretCast(cast, rewriter, loc);
+    if (failed(resultDescriptor)) {
+      return rewriter.notifyMatchFailure(
+          op, "failed to resolve descriptor for memref.reinterpret_cast op");
+    }
+
+    replaceOffsetSizesAndStridesWith(rewriter, op, resultDescriptor.value());
+
+    // Base buffer.
+    Value replacement = getBaseBufferReplacementForDescriptor(op, rewriter, loc,
+                                                              cast.getResult());
+    rewriter.replaceAllUsesWith(op.getBaseBuffer(), replacement);
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 // MemRef globals are always static shaped and reference a non-offset
 // buffer.
 struct FromGlobal : public OpRewritePattern<GetBufferDescriptorOp> {
@@ -417,7 +482,7 @@ public:
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
     patterns.insert<FromAllocation, FromGlobal, FromHalInterfaceBindingSubspan,
-                    FromMemRefSubView>(&getContext());
+                    FromMemRefSubView, FromReinterpretCast>(&getContext());
 
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             std::move(patterns)))) {
