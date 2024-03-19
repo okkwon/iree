@@ -431,9 +431,9 @@ struct DotGeneralToDot final : impl::DotGeneralToDotBase<DotGeneralToDot> {
 void populatePreprocessingDotGeneralToDotPatterns(mlir::MLIRContext *context,
                                                   RewritePatternSet *patterns,
                                                   PatternBenefit benefit) {
-  patterns
-      ->add<GeneralDotConvert, GeneralDotRemoveBatch, DotVectorOptimization>(
-          context, benefit);
+  patterns->add<GeneralDotConvert,
+                GeneralDotRemoveBatch /*, DotVectorOptimization*/>(context,
+                                                                   benefit);
 }
 
 } // namespace mlir::iree_compiler::stablehlo
