@@ -55,12 +55,11 @@ public:
     // sizes. It is not fully integrated into the pipeline, so we remain the
     // materialization to the end.
     auto executableTarget = executableTargets[0];
-    if (executableTarget.getBackend() == "vmvx") {
-      return;
-    }
 
-    // Only llvm-cpu backends handle encodings for now, others just go with nop.
-    if (executableTarget.getBackend() != "llvm-cpu") {
+    // Only llvm-cpu and vmvx backends handle encodings for now, others just go
+    // with nop.
+    if (executableTarget.getBackend() != "llvm-cpu" &&
+        executableTarget.getBackend() != "vmvx") {
       return runNopPipeline(moduleOp);
     }
 
