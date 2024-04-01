@@ -37,6 +37,15 @@ using IREE::HAL::ExecutableTargetAttr;
 static SmallVector<TileMxNxK>
 enumerateMatmulTilesVMVX(linalg::ContractionDimensions cDims,
                          ExecutableTargetAttr target) {
+#if 1
+  // Testing x86 avx+
+  return {
+      TileMxNxK{8, 8, 1}, // Aim to use VFMADD* (ymm).
+      TileMxNxK{4, 8, 1}, // Truncation of the above.
+      TileMxNxK{2, 8, 1}, // Truncation of the above.
+      TileMxNxK{1, 8, 1}, // Truncation of the above.
+  };
+#else
   // TODO(hanchung): The ukernel path does not support 3d
   // codegen.query_tile_sizes op, so we disable dynamic tile shapes for
   // batch_matmul.
@@ -52,6 +61,7 @@ enumerateMatmulTilesVMVX(linalg::ContractionDimensions cDims,
       TileMxNxK{2, 8, 4}, // Truncation of the above.
       TileMxNxK{1, 8, 4}, // Truncation of the above.
   };
+#endif
 }
 
 // Enumerate tile sizes to choose from on riscv32.
