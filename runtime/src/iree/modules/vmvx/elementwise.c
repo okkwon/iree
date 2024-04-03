@@ -53,6 +53,7 @@ typedef enum {
   IREE_UK_X32U_LOGF,
   IREE_UK_X32U_NEGF,
   IREE_UK_X32U_RSQRTF,
+  IREE_UK_X32U_TANHF,
 } iree_uk_x32u_opcode_t;
 
 // Macros to access various typed, dereferenced pointers.
@@ -190,6 +191,9 @@ static void iree_uk_generic_x32u_op(iree_uk_x32u_opcode_t opcode,
     case IREE_UK_X32U_RSQRTF:
       ASF32(out) = 1.0f / sqrtf(ASF32(in));
       return;
+    case IREE_UK_X32U_TANHF:
+      ASF32(out) = tanhf(ASF32(in));
+      return;
     default:
       *result_code = 1;
   }
@@ -274,3 +278,4 @@ DISPATCH_UKERNEL_UNARY_2D(floorf, IREE_UK_X32U_FLOORF, iree_uk_uint32_t, x32u);
 DISPATCH_UKERNEL_UNARY_2D(logf, IREE_UK_X32U_LOGF, iree_uk_uint32_t, x32u);
 DISPATCH_UKERNEL_UNARY_2D(negf, IREE_UK_X32U_NEGF, iree_uk_uint32_t, x32u);
 DISPATCH_UKERNEL_UNARY_2D(rsqrtf, IREE_UK_X32U_RSQRTF, iree_uk_uint32_t, x32u);
+DISPATCH_UKERNEL_UNARY_2D(tanhf, IREE_UK_X32U_TANHF, iree_uk_uint32_t, x32u);

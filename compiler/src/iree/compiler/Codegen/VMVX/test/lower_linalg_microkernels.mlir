@@ -340,3 +340,15 @@ func.func @rsqrt(%arg0 : memref<64x64xf32>, %arg1 : memref<64xf32>) {
   }
   func.return
 }
+
+// CHECK-LABEL: @tanh
+// CHECK: vmvx.unary op("tanh" : f32)
+func.func @tanh(%arg0 : memref<64x64xf32>, %arg1 : memref<64xf32>) {
+  linalg.generic {indexing_maps = [affine_map<(d0, d1) -> (d1)>, affine_map<(d0, d1) -> (d0, d1)>], iterator_types = ["parallel", "parallel"]}
+    ins(%arg1 : memref<64xf32>) outs(%arg0 : memref<64x64xf32>) {
+  ^bb0(%arg2: f32, %arg3: f32):
+    %12 = math.tanh %arg2 : f32
+    linalg.yield %12 : f32
+  }
+  func.return
+}

@@ -807,6 +807,12 @@ struct LinalgUnaryGenericConversion
               }
               return std::nullopt;
             })
+            .Case([&](math::TanhOp op) -> std::optional<UnaryEmitter> {
+              if (resultType.getIntOrFloatBitWidth() == 32) {
+                return configureGenericUnary(op, "tanh");
+              }
+              return std::nullopt;
+            })
             .Default([](Operation *) { return std::nullopt; });
 
     // Determine op type to lower to.

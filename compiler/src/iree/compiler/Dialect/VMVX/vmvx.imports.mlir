@@ -355,6 +355,15 @@ vm.import private @rsqrt.2d.f32(
   %sizes : tuple<i64, i64>
 )
 
+vm.import private @tanh.2d.f32(
+  %in_buffer : !vm.buffer,
+  %in_offset : i64,
+  %in_strides : tuple<i64, i64>,
+  %out_buffer : !vm.buffer,
+  %out_offset : i64,
+  %out_strides : tuple<i64, i64>,
+  %sizes : tuple<i64, i64>
+)
 //==============================================================================
 // Strided copy ops
 // Variants of copy ops exist for power of two rank and datatype sizes.
