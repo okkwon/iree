@@ -6,6 +6,7 @@
 
 #include "iree/modules/vmvx/elementwise.h"
 
+#include "xnnpack.h"
 // TODO: We should only be including/using this in standalone builds. In others,
 // we have to emulate or use other mechanisms. Since this file only contains
 // fallback implementations, we don't care about the quality *that* much but
@@ -278,4 +279,26 @@ DISPATCH_UKERNEL_UNARY_2D(floorf, IREE_UK_X32U_FLOORF, iree_uk_uint32_t, x32u);
 DISPATCH_UKERNEL_UNARY_2D(logf, IREE_UK_X32U_LOGF, iree_uk_uint32_t, x32u);
 DISPATCH_UKERNEL_UNARY_2D(negf, IREE_UK_X32U_NEGF, iree_uk_uint32_t, x32u);
 DISPATCH_UKERNEL_UNARY_2D(rsqrtf, IREE_UK_X32U_RSQRTF, iree_uk_uint32_t, x32u);
+
+// #define USE_TANH_UKERNEL
+#ifdef USE_TANH_UKERNEL
 DISPATCH_UKERNEL_UNARY_2D(tanhf, IREE_UK_X32U_TANHF, iree_uk_uint32_t, x32u);
+#else
+IREE_UK_EXPORT int iree_uk_x32u_tanhf_2d(
+    const iree_uk_uint32_t* in, iree_uk_index_t in_offset,
+    iree_uk_index_t in_stride0, iree_uk_index_t in_stride1,
+    iree_uk_uint32_t* IREE_UK_RESTRICT out, iree_uk_index_t out_offset,
+    iree_uk_index_t out_stride0, iree_uk_index_t out_stride1,
+    iree_uk_index_t size0, iree_uk_index_t size1) {
+  enum xnn_status status;
+  for (iree_uk_index_t i = 0; i < size0; ++i) {
+    status = xnn_run_tile_tanh_nc_f32(size1, (void*)&in[i * in_stride0],
+                                      (void*)&out[i * out_stride0]);
+    if (status != xnn_status_success) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+#endif  // USE_TANH_UKERNEL
