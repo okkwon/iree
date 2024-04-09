@@ -58,6 +58,30 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
 }
 
 static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
+                                   linalg::GenericOp op) {
+  assert(!getLoweringConfig(op) && "expected lowering_config is not set");
+
+  // Check if it is an elementwise tanh, which uses the xnnpack tanh
+  // microkernel. The logic is to get the minimum tile size for the op and
+  // divide the workload by the number of threads to get the per-thread
+  // workload. The per-thread workload should be a multiple of the minimum tile
+  // size, e.g., 32, for tanh for avx2+.
+
+  // TODO: Need a better way to represent the op itself using stablehlo or
+  // linalg named ops.
+
+  // TODO: For VMVX + Ukernel, each dispatch tends to have a single operation,
+  // which makes the tile size selection as per-op.
+
+  SmallVector<int64_t> distTileSizes =
+      getDefaultDistributionTileSizes(cast<TilingInterface>(op.getOperation()));
+  TileSizesListType tileSizes = {distTileSizes};
+  return setOpConfigAndEntryPointFnTranslation(
+      entryPointFn, op, tileSizes,
+      IREE::Codegen::DispatchLoweringPassPipeline::VMVXDefault);
+}
+
+static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
                                    TilingInterface tilingInterfaceOp) {
   assert(!getLoweringConfig(tilingInterfaceOp) &&
          "expected lowering_config is not set");
@@ -74,6 +98,8 @@ static LogicalResult
 setVMVXRootConfigImpl(mlir::FunctionOpInterface entryPointFn, Operation *op) {
   auto setRootConfigFn = [&](Operation *op) -> LogicalResult {
     return TypeSwitch<Operation *, LogicalResult>(op)
+        .Case<linalg::GenericOp>(
+            [&](auto op) { return setRootConfig(entryPointFn, op); })
         .Case<IREE::LinalgExt::FftOp>(
             [&](auto op) { return setRootConfig(entryPointFn, op); })
         .Case<TilingInterface>(
