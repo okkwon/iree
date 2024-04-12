@@ -14,6 +14,8 @@
 // path.
 #include <math.h>
 
+#define USE_XNNPACK_UKERNEL
+
 //===----------------------------------------------------------------------===//
 // Helpers for defining generic implementations of elementwise functions.
 // Since it affords the best code size tradeoff options, the entrypoint
@@ -260,7 +262,27 @@ DISPATCH_UKERNEL_BINARY_2D(andi, IREE_UK_X32B_ANDI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(divf, IREE_UK_X32B_DIVF, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(divsi, IREE_UK_X32B_DIVSI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(divui, IREE_UK_X32B_DIVUI, iree_uk_uint32_t, x32b);
+#ifndef USE_XNNPACK_UKERNEL
 DISPATCH_UKERNEL_BINARY_2D(mulf, IREE_UK_X32B_MULF, iree_uk_uint32_t, x32b);
+#else
+IREE_UK_EXPORT int iree_uk_x32b_mulf_2d(
+    const iree_uk_uint32_t* lhs, iree_uk_index_t lhs_offset,
+    iree_uk_index_t lhs_stride0, iree_uk_index_t lhs_stride1,
+    const iree_uk_uint32_t* rhs, iree_uk_index_t rhs_offset,
+    iree_uk_index_t rhs_stride0, iree_uk_index_t rhs_stride1,
+    iree_uk_uint32_t* IREE_UK_RESTRICT out, iree_uk_index_t out_offset,
+    iree_uk_index_t out_stride0, iree_uk_index_t out_stride1,
+    iree_uk_index_t size0, iree_uk_index_t size1) {
+  enum xnn_status status;
+  for (iree_uk_index_t i = 0; i < size0; ++i) {
+    status = xnn_run_tile_multiply_nd_f32(
+        size1, (const float*)&lhs[i * lhs_stride0],
+        (const float*)&rhs[i * rhs_stride0], (float*)&out[i * out_stride0]);
+  }
+  return status;
+}
+
+#endif  // USE_XNNPACK_UKERNEL
 DISPATCH_UKERNEL_BINARY_2D(muli, IREE_UK_X32B_MULI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(ori, IREE_UK_X32B_ORI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(shli, IREE_UK_X32B_SHLI, iree_uk_uint32_t, x32b);
@@ -280,8 +302,7 @@ DISPATCH_UKERNEL_UNARY_2D(logf, IREE_UK_X32U_LOGF, iree_uk_uint32_t, x32u);
 DISPATCH_UKERNEL_UNARY_2D(negf, IREE_UK_X32U_NEGF, iree_uk_uint32_t, x32u);
 DISPATCH_UKERNEL_UNARY_2D(rsqrtf, IREE_UK_X32U_RSQRTF, iree_uk_uint32_t, x32u);
 
-// #define USE_TANH_UKERNEL
-#ifdef USE_TANH_UKERNEL
+#ifndef USE_XNNPACK_UKERNEL
 DISPATCH_UKERNEL_UNARY_2D(tanhf, IREE_UK_X32U_TANHF, iree_uk_uint32_t, x32u);
 #else
 IREE_UK_EXPORT int iree_uk_x32u_tanhf_2d(
@@ -290,6 +311,7 @@ IREE_UK_EXPORT int iree_uk_x32u_tanhf_2d(
     iree_uk_uint32_t* IREE_UK_RESTRICT out, iree_uk_index_t out_offset,
     iree_uk_index_t out_stride0, iree_uk_index_t out_stride1,
     iree_uk_index_t size0, iree_uk_index_t size1) {
+  // FIXME: use the generic implementation if any innermost stride is not 1.
   enum xnn_status status;
   for (iree_uk_index_t i = 0; i < size0; ++i) {
     status = xnn_run_tile_tanh_nc_f32(size1, (void*)&in[i * in_stride0],
