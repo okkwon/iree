@@ -11,6 +11,7 @@
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 
@@ -83,6 +84,32 @@ static bool isTanhf(linalg::GenericOp op) {
   return resultType.isF32();
 }
 
+static int64_t getTileSize(linalg::GenericOp op) {
+  auto result = getUnaryOp(op);
+  if (failed(result))
+    return kDefaultDistTileSize;
+
+  Operation *scalarOp = *result;
+  auto resultTensorType = cast<RankedTensorType>(op->getResult(0).getType());
+
+  int64_t tileSize =
+      TypeSwitch<Operation *, int64_t>(scalarOp)
+          .Case([&](math::TanhOp op) -> int64_t {
+            if (op.getResult().getType().isF32()) {
+              // TODO: this is target depedent, need to use the target info.
+              const int64_t minTileSize = 32;
+
+              int64_t numElems = resultTensorType.getNumElements();
+              int64_t tileSize = numElems / clNumberOfRuntimeThreads;
+              tileSize = llvm::alignTo(tileSize, minTileSize);
+              return tileSize;
+            }
+            return kDefaultDistTileSize;
+          })
+          .Default([](Operation *) { return kDefaultDistTileSize; });
+  return tileSize;
+}
+
 /// Sets the lowering configuration for dispatch region for linalg_ext.fft
 /// root op.
 static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
@@ -122,14 +149,7 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
 
   // TODO: For VMVX + Ukernel, each dispatch tends to have a single operation,
   // which makes the tile size selection per op.
-  int tileSize = kDefaultDistTileSize;
-  if (isTanhf(op)) {
-    // Evenly divide the number of elements by the number of threads
-    auto resultType = cast<RankedTensorType>(op.getResult(0).getType());
-    int64_t numElems = resultType.getNumElements();
-    tileSize = numElems / clNumberOfRuntimeThreads;
-    tileSize = llvm::PowerOf2Ceil(tileSize);
-  }
+  int64_t tileSize = getTileSize(op);
 
   SmallVector<int64_t> distTileSizes = getDefaultDistributionTileSizes(
       cast<TilingInterface>(op.getOperation()), tileSize);
