@@ -10,6 +10,8 @@
 #include "iree/compiler/Codegen/Utils/Utils.h"
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
+#include "llvm/Support/CommandLine.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 
 #define DEBUG_TYPE "vmvx-kernel-dispatch"
@@ -18,12 +20,18 @@ namespace mlir::iree_compiler {
 
 constexpr int kDefaultDistTileSize = 64;
 
-static SmallVector<int64_t>
-getDefaultDistributionTileSizes(TilingInterface op) {
+static llvm::cl::opt<int> clNumberOfRuntimeThreads(
+    "iree-vmvx-number-of-threads",
+    llvm::cl::desc(
+        "number of threads that are used to determine the tile sizes"),
+    llvm::cl::init(4));
+
+static SmallVector<int64_t> getDefaultDistributionTileSizes(TilingInterface op,
+                                                            int tileSize) {
   unsigned numLoops = op.getLoopIteratorTypes().size();
   auto partitionedLoops = cast<PartitionableLoopsInterface>(op.getOperation())
                               .getPartitionableLoops(kNumMaxParallelDims);
-  SmallVector<int64_t> distTileSizes(numLoops, kDefaultDistTileSize);
+  SmallVector<int64_t> distTileSizes(numLoops, tileSize);
   llvm::DenseSet<unsigned> partitionedLoopsSet(partitionedLoops.begin(),
                                                partitionedLoops.end());
   for (auto dim : llvm::seq<int64_t>(0, distTileSizes.size())) {
@@ -34,12 +42,54 @@ getDefaultDistributionTileSizes(TilingInterface op) {
   return distTileSizes;
 }
 
+// TODO: move to a utility file
+
+static FailureOr<Operation *> getUnaryOp(linalg::GenericOp op) {
+  auto &children = op.getBlock()->getOperations();
+  // Only match two children (op + yield).
+  if (children.size() != 2)
+    return failure();
+  // Only match parallel loops.
+  if (op.getNumParallelLoops() != op.getNumLoops())
+    return failure();
+
+  // Match:
+  //   %0 = someop %arg2
+  //   yield %0
+  Operation *unaryOp = &children.front();
+  Operation *yieldOp = op.getBlock()->getTerminator();
+  if (unaryOp->getNumOperands() != 1 || yieldOp->getNumOperands() != 1 ||
+      yieldOp->getOperand(0) != unaryOp->getResult(0)) {
+    return failure();
+  }
+  BlockArgument operandScalar0 =
+      llvm::dyn_cast<BlockArgument>(unaryOp->getOperands()[0]);
+  if (!operandScalar0)
+    return failure();
+
+  return unaryOp;
+}
+
+static bool isTanhf(linalg::GenericOp op) {
+  auto result = getUnaryOp(op);
+  if (failed(result)) {
+    return false;
+  }
+  Operation *scalarOp = *result;
+  if (!isa<math::TanhOp>(scalarOp))
+    return false;
+
+  Type resultType = scalarOp->getResult(0).getType();
+  return resultType.isF32();
+}
+
 /// Sets the lowering configuration for dispatch region for linalg_ext.fft
 /// root op.
 static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
                                    IREE::LinalgExt::FftOp fftOp) {
   assert(!getLoweringConfig(fftOp) && "expected lowering_config is not set");
-  SmallVector<int64_t> distTileSizes = getDefaultDistributionTileSizes(fftOp);
+  SmallVector<int64_t> distTileSizes =
+      getDefaultDistributionTileSizes(fftOp, kDefaultDistTileSize);
   auto rank = fftOp.getOperandRank();
   if (distTileSizes.size() >= rank && distTileSizes[rank - 1] != 0) {
     APInt value;
@@ -71,10 +121,18 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
   // linalg named ops.
 
   // TODO: For VMVX + Ukernel, each dispatch tends to have a single operation,
-  // which makes the tile size selection as per-op.
+  // which makes the tile size selection per op.
+  int tileSize = kDefaultDistTileSize;
+  if (isTanhf(op)) {
+    // Evenly divide the number of elements by the number of threads
+    auto resultType = cast<RankedTensorType>(op.getResult(0).getType());
+    int64_t numElems = resultType.getNumElements();
+    tileSize = numElems / clNumberOfRuntimeThreads;
+    tileSize = llvm::PowerOf2Ceil(tileSize);
+  }
 
-  SmallVector<int64_t> distTileSizes =
-      getDefaultDistributionTileSizes(cast<TilingInterface>(op.getOperation()));
+  SmallVector<int64_t> distTileSizes = getDefaultDistributionTileSizes(
+      cast<TilingInterface>(op.getOperation()), tileSize);
   TileSizesListType tileSizes = {distTileSizes};
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, op, tileSizes,
@@ -87,7 +145,7 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
          "expected lowering_config is not set");
 
   SmallVector<int64_t> distTileSizes =
-      getDefaultDistributionTileSizes(tilingInterfaceOp);
+      getDefaultDistributionTileSizes(tilingInterfaceOp, kDefaultDistTileSize);
   TileSizesListType tileSizes = {distTileSizes};
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, tilingInterfaceOp, tileSizes,
