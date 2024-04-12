@@ -57,18 +57,52 @@ static FailureOr<Operation *> getUnaryOp(linalg::GenericOp op) {
   // Match:
   //   %0 = someop %arg2
   //   yield %0
-  Operation *unaryOp = &children.front();
+  Operation *scalarOp = &children.front();
   Operation *yieldOp = op.getBlock()->getTerminator();
-  if (unaryOp->getNumOperands() != 1 || yieldOp->getNumOperands() != 1 ||
-      yieldOp->getOperand(0) != unaryOp->getResult(0)) {
+  if (scalarOp->getNumOperands() != 1 || yieldOp->getNumOperands() != 1 ||
+      yieldOp->getOperand(0) != scalarOp->getResult(0)) {
     return failure();
   }
   BlockArgument operandScalar0 =
-      llvm::dyn_cast<BlockArgument>(unaryOp->getOperands()[0]);
+      llvm::dyn_cast<BlockArgument>(scalarOp->getOperands()[0]);
   if (!operandScalar0)
     return failure();
 
-  return unaryOp;
+  return scalarOp;
+}
+
+static FailureOr<Operation *> getBinaryOp(linalg::GenericOp op) {
+  auto &children = op.getBlock()->getOperations();
+  // Only match two children (op + yield).
+  if (children.size() != 2)
+    return failure();
+  // Only match parallel loops.
+  if (op.getNumParallelLoops() != op.getNumLoops())
+    return failure();
+
+  // Match:
+  //   %0 = someop %arg2
+  //   yield %0
+  Operation *scalarOp = &children.front();
+  Operation *yieldOp = op.getBlock()->getTerminator();
+  if (scalarOp->getNumOperands() != 2 || yieldOp->getNumOperands() != 1 ||
+      yieldOp->getOperand(0) != scalarOp->getResult(0)) {
+    return failure();
+  }
+  BlockArgument operandScalar0 =
+      llvm::dyn_cast<BlockArgument>(scalarOp->getOperands()[0]);
+  if (!operandScalar0)
+    return failure();
+
+  return scalarOp;
+}
+
+static FailureOr<Operation *> getUnaryOrBinaryOp(linalg::GenericOp op) {
+  auto result = getUnaryOp(op);
+  if (succeeded(result))
+    return result;
+
+  return getBinaryOp(op);
 }
 
 static bool isTanhf(linalg::GenericOp op) {
@@ -85,16 +119,36 @@ static bool isTanhf(linalg::GenericOp op) {
 }
 
 static int64_t getTileSize(linalg::GenericOp op) {
-  auto result = getUnaryOp(op);
+  auto result = getUnaryOrBinaryOp(op);
   if (failed(result))
     return kDefaultDistTileSize;
 
   Operation *scalarOp = *result;
   auto resultTensorType = cast<RankedTensorType>(op->getResult(0).getType());
 
+  // FIXME: support 2D shapes too
+  // This is a bit complicated since it needs a reshape in some cases.
+  // In general, what we need is not the tile size. We need the workload per
+  // thread.
+  if (resultTensorType.getShape().size() != 1) {
+    return kDefaultDistTileSize;
+  }
+
   int64_t tileSize =
       TypeSwitch<Operation *, int64_t>(scalarOp)
           .Case([&](math::TanhOp op) -> int64_t {
+            if (op.getResult().getType().isF32()) {
+              // TODO: this is target depedent, need to use the target info.
+              const int64_t minTileSize = 32;
+
+              int64_t numElems = resultTensorType.getNumElements();
+              int64_t tileSize = numElems / clNumberOfRuntimeThreads;
+              tileSize = llvm::alignTo(tileSize, minTileSize);
+              return tileSize;
+            }
+            return kDefaultDistTileSize;
+          })
+          .Case([&](arith::MulFOp op) -> int64_t {
             if (op.getResult().getType().isF32()) {
               // TODO: this is target depedent, need to use the target info.
               const int64_t minTileSize = 32;
