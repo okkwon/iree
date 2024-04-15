@@ -256,15 +256,45 @@ IREE_UK_ATTRIBUTE_NOINLINE static int iree_uk_generic_x32u_2d(
   return result_code;
 }
 
-DISPATCH_UKERNEL_BINARY_2D(addf, IREE_UK_X32B_ADDF, iree_uk_uint32_t, x32b);
+// Generic implementation
 DISPATCH_UKERNEL_BINARY_2D(addi, IREE_UK_X32B_ADDI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(andi, IREE_UK_X32B_ANDI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(divf, IREE_UK_X32B_DIVF, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(divsi, IREE_UK_X32B_DIVSI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(divui, IREE_UK_X32B_DIVUI, iree_uk_uint32_t, x32b);
+DISPATCH_UKERNEL_BINARY_2D(muli, IREE_UK_X32B_MULI, iree_uk_uint32_t, x32b);
+DISPATCH_UKERNEL_BINARY_2D(ori, IREE_UK_X32B_ORI, iree_uk_uint32_t, x32b);
+DISPATCH_UKERNEL_BINARY_2D(shli, IREE_UK_X32B_SHLI, iree_uk_uint32_t, x32b);
+DISPATCH_UKERNEL_BINARY_2D(shrsi, IREE_UK_X32B_SHRSI, iree_uk_uint32_t, x32b);
+DISPATCH_UKERNEL_BINARY_2D(shrui, IREE_UK_X32B_SHRUI, iree_uk_uint32_t, x32b);
+DISPATCH_UKERNEL_BINARY_2D(subf, IREE_UK_X32B_SUBF, iree_uk_uint32_t, x32b);
+DISPATCH_UKERNEL_BINARY_2D(subi, IREE_UK_X32B_SUBI, iree_uk_uint32_t, x32b);
+DISPATCH_UKERNEL_BINARY_2D(xori, IREE_UKENREL_X32B_XORI, iree_uk_uint32_t,
+                           x32b);
+
+// XNNPACK ukernel implementation
 #ifndef USE_XNNPACK_UKERNEL
+DISPATCH_UKERNEL_BINARY_2D(addf, IREE_UK_X32B_ADDF, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(mulf, IREE_UK_X32B_MULF, iree_uk_uint32_t, x32b);
 #else
+// TODO: create a macro with opcode
+IREE_UK_EXPORT int iree_uk_x32b_addf_2d(
+    const iree_uk_uint32_t* lhs, iree_uk_index_t lhs_offset,
+    iree_uk_index_t lhs_stride0, iree_uk_index_t lhs_stride1,
+    const iree_uk_uint32_t* rhs, iree_uk_index_t rhs_offset,
+    iree_uk_index_t rhs_stride0, iree_uk_index_t rhs_stride1,
+    iree_uk_uint32_t* IREE_UK_RESTRICT out, iree_uk_index_t out_offset,
+    iree_uk_index_t out_stride0, iree_uk_index_t out_stride1,
+    iree_uk_index_t size0, iree_uk_index_t size1) {
+  enum xnn_status status;
+  for (iree_uk_index_t i = 0; i < size0; ++i) {
+    status = xnn_run_tile_add_nd_f32(
+        size1, (const float*)&lhs[i * lhs_stride0],
+        (const float*)&rhs[i * rhs_stride0], (float*)&out[i * out_stride0]);
+  }
+  return status;
+}
+
 IREE_UK_EXPORT int iree_uk_x32b_mulf_2d(
     const iree_uk_uint32_t* lhs, iree_uk_index_t lhs_offset,
     iree_uk_index_t lhs_stride0, iree_uk_index_t lhs_stride1,
@@ -281,17 +311,7 @@ IREE_UK_EXPORT int iree_uk_x32b_mulf_2d(
   }
   return status;
 }
-
 #endif  // USE_XNNPACK_UKERNEL
-DISPATCH_UKERNEL_BINARY_2D(muli, IREE_UK_X32B_MULI, iree_uk_uint32_t, x32b);
-DISPATCH_UKERNEL_BINARY_2D(ori, IREE_UK_X32B_ORI, iree_uk_uint32_t, x32b);
-DISPATCH_UKERNEL_BINARY_2D(shli, IREE_UK_X32B_SHLI, iree_uk_uint32_t, x32b);
-DISPATCH_UKERNEL_BINARY_2D(shrsi, IREE_UK_X32B_SHRSI, iree_uk_uint32_t, x32b);
-DISPATCH_UKERNEL_BINARY_2D(shrui, IREE_UK_X32B_SHRUI, iree_uk_uint32_t, x32b);
-DISPATCH_UKERNEL_BINARY_2D(subf, IREE_UK_X32B_SUBF, iree_uk_uint32_t, x32b);
-DISPATCH_UKERNEL_BINARY_2D(subi, IREE_UK_X32B_SUBI, iree_uk_uint32_t, x32b);
-DISPATCH_UKERNEL_BINARY_2D(xori, IREE_UKENREL_X32B_XORI, iree_uk_uint32_t,
-                           x32b);
 
 DISPATCH_UKERNEL_UNARY_2D(absf, IREE_UK_X32U_ABSF, iree_uk_uint32_t, x32u);
 DISPATCH_UKERNEL_UNARY_2D(ceilf, IREE_UK_X32U_CEILF, iree_uk_uint32_t, x32u);
