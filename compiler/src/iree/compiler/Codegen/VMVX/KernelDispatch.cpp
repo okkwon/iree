@@ -12,6 +12,7 @@
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MathExtras.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 
@@ -134,32 +135,23 @@ static int64_t getTileSize(linalg::GenericOp op) {
     return kDefaultDistTileSize;
   }
 
+  Type elemType = resultTensorType.getElementType();
+
   int64_t tileSize =
       TypeSwitch<Operation *, int64_t>(scalarOp)
-          .Case([&](math::TanhOp op) -> int64_t {
-            if (op.getResult().getType().isF32()) {
-              // TODO: this is target depedent, need to use the target info.
-              const int64_t minTileSize = 32;
+          .Case<arith::AddFOp, arith::MulFOp, math::TanhOp>(
+              [&](Operation *) -> int64_t {
+                if (elemType.isF32()) {
+                  // TODO: this is target depedent, need to use the target info.
+                  const int64_t minTileSize = 32;
 
-              int64_t numElems = resultTensorType.getNumElements();
-              int64_t tileSize = numElems / clNumberOfRuntimeThreads;
-              tileSize = llvm::alignTo(tileSize, minTileSize);
-              return tileSize;
-            }
-            return kDefaultDistTileSize;
-          })
-          .Case([&](arith::MulFOp op) -> int64_t {
-            if (op.getResult().getType().isF32()) {
-              // TODO: this is target depedent, need to use the target info.
-              const int64_t minTileSize = 32;
-
-              int64_t numElems = resultTensorType.getNumElements();
-              int64_t tileSize = numElems / clNumberOfRuntimeThreads;
-              tileSize = llvm::alignTo(tileSize, minTileSize);
-              return tileSize;
-            }
-            return kDefaultDistTileSize;
-          })
+                  int64_t numElems = resultTensorType.getNumElements();
+                  int64_t tileSize = numElems / clNumberOfRuntimeThreads;
+                  tileSize = llvm::alignTo(tileSize, minTileSize);
+                  return tileSize;
+                }
+                return kDefaultDistTileSize;
+              })
           .Default([](Operation *) { return kDefaultDistTileSize; });
   return tileSize;
 }
