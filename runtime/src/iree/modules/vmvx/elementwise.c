@@ -44,7 +44,8 @@ typedef enum {
   IREE_UK_X32B_SHRUI = 11,
   IREE_UK_X32B_SUBF = 12,
   IREE_UK_X32B_SUBI = 13,
-  IREE_UKENREL_X32B_XORI = 14,
+  IREE_UK_X32B_XORI = 14,
+  IREE_UK_X32B_CMPI_EQ_F32 = 15,
 } iree_uk_x32b_opcode_t;
 
 typedef enum {
@@ -122,6 +123,9 @@ static void iree_uk_generic_x32b_op(iree_uk_x32b_opcode_t opcode,
     case IREE_UK_X32B_ANDI:
       ASUI32(out) = ASUI32(lhs) & ASUI32(rhs);
       return;
+    case IREE_UK_X32B_CMPI_EQ_F32:
+      ASF32(out) = (ASUI32(lhs) == ASUI32(rhs)) ? 1.0f : 0.0f;
+      return;
     case IREE_UK_X32B_DIVF:
       ASF32(out) = ASF32(lhs) / ASF32(rhs);
       return;
@@ -149,7 +153,7 @@ static void iree_uk_generic_x32b_op(iree_uk_x32b_opcode_t opcode,
     case IREE_UK_X32B_SHRUI:
       ASUI32(out) = ASUI32(lhs) >> ASUI32(rhs);
       return;
-    case IREE_UKENREL_X32B_XORI:
+    case IREE_UK_X32B_XORI:
       ASUI32(out) = ASUI32(lhs) ^ ASUI32(rhs);
       return;
     case IREE_UK_X32B_SUBF:
@@ -259,6 +263,8 @@ IREE_UK_ATTRIBUTE_NOINLINE static int iree_uk_generic_x32u_2d(
 // Generic implementation
 DISPATCH_UKERNEL_BINARY_2D(addi, IREE_UK_X32B_ADDI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(andi, IREE_UK_X32B_ANDI, iree_uk_uint32_t, x32b);
+DISPATCH_UKERNEL_BINARY_2D(cmpi_eq_f32, IREE_UK_X32B_CMPI_EQ_F32,
+                           iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(divf, IREE_UK_X32B_DIVF, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(divsi, IREE_UK_X32B_DIVSI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(divui, IREE_UK_X32B_DIVUI, iree_uk_uint32_t, x32b);
@@ -269,8 +275,7 @@ DISPATCH_UKERNEL_BINARY_2D(shrsi, IREE_UK_X32B_SHRSI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(shrui, IREE_UK_X32B_SHRUI, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(subf, IREE_UK_X32B_SUBF, iree_uk_uint32_t, x32b);
 DISPATCH_UKERNEL_BINARY_2D(subi, IREE_UK_X32B_SUBI, iree_uk_uint32_t, x32b);
-DISPATCH_UKERNEL_BINARY_2D(xori, IREE_UKENREL_X32B_XORI, iree_uk_uint32_t,
-                           x32b);
+DISPATCH_UKERNEL_BINARY_2D(xori, IREE_UK_X32B_XORI, iree_uk_uint32_t, x32b);
 
 // XNNPACK ukernel implementation
 #ifndef USE_XNNPACK_UKERNEL
@@ -288,9 +293,9 @@ IREE_UK_EXPORT int iree_uk_x32b_addf_2d(
     iree_uk_index_t size0, iree_uk_index_t size1) {
   enum xnn_status status;
   for (iree_uk_index_t i = 0; i < size0; ++i) {
-    status = xnn_run_tile_add_nd_f32(
-        size1, (const float*)&lhs[i * lhs_stride0],
-        (const float*)&rhs[i * rhs_stride0], (float*)&out[i * out_stride0]);
+    status = xnn_run_tile_add_nd_f32(size1, (const float*)&lhs[i * lhs_stride0],
+                                     (const float*)&rhs[i * rhs_stride0],
+                                     (float*)&out[i * out_stride0]);
   }
   return status;
 }

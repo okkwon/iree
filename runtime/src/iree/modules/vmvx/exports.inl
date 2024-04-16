@@ -28,6 +28,7 @@ EXPORT_FN("add.2d.f32", iree_uk_x32b_addf_2d, ukernel_x32b_2d, rIIIrIIIrIIIII, v
 EXPORT_FN("add.2d.i32", iree_uk_x32b_addi_2d, ukernel_x32b_2d, rIIIrIIIrIIIII, v)
 EXPORT_FN("and.2d.i32", iree_uk_x32b_andi_2d, ukernel_x32b_2d, rIIIrIIIrIIIII, v)
 EXPORT_FN("ceil.2d.f32", iree_uk_x32u_ceilf_2d, ukernel_x32u_2d, rIIIrIIIII, v)
+EXPORT_FN("cmpi_eq_f32.2d.i32", iree_uk_x32b_cmpi_eq_f32_2d, ukernel_x32b_2d, rIIIrIIIrIIIII, v)
 EXPORT_FN("copy.2d.x16", iree_vmvx_copy2d_x16, unary2d, rIIIrIIIII, v)
 EXPORT_FN("copy.2d.x32", iree_vmvx_copy2d_x32, unary2d, rIIIrIIIII, v)
 EXPORT_FN("copy.2d.x64", iree_vmvx_copy2d_x64, unary2d, rIIIrIIIII, v)

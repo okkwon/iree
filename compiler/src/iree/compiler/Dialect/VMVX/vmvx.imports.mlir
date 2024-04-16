@@ -78,6 +78,22 @@ vm.import private @and.2d.i32(
   %sizes : tuple<i64, i64>
 )
 
+vm.import private @cmpi_eq_f32.2d.i32(
+  %lhs_buffer : !vm.buffer,
+  %lhs_offset : i64,
+  %lhs_strides : tuple<i64, i64>,
+
+  %rhs_buffer : !vm.buffer,
+  %rhs_offset : i64,
+  %rhs_strides : tuple<i64, i64>,
+
+  %out_buffer : !vm.buffer,
+  %out_offset : i64,
+  %out_strides : tuple<i64, i64>,
+
+  %sizes : tuple<i64, i64>
+)
+
 vm.import private @div.2d.f32(
   %lhs_buffer : !vm.buffer,
   %lhs_offset : i64,

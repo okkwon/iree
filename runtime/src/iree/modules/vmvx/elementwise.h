@@ -45,6 +45,7 @@ typedef int (*iree_uk_x32b_2d_func_t)(
 DECLARE_UKERNEL_BINARY_2D(addf, iree_uk_uint32_t, x32b);
 DECLARE_UKERNEL_BINARY_2D(addi, iree_uk_uint32_t, x32b);
 DECLARE_UKERNEL_BINARY_2D(andi, iree_uk_uint32_t, x32b);
+DECLARE_UKERNEL_BINARY_2D(cmpi_eq_f32, iree_uk_uint32_t, x32b);
 DECLARE_UKERNEL_BINARY_2D(divf, iree_uk_uint32_t, x32b);
 DECLARE_UKERNEL_BINARY_2D(divsi, iree_uk_uint32_t, x32b);
 DECLARE_UKERNEL_BINARY_2D(divui, iree_uk_uint32_t, x32b);
