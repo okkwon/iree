@@ -125,7 +125,13 @@ static int64_t getTileSize(linalg::GenericOp op) {
     return kDefaultDistTileSize;
 
   Operation *scalarOp = *result;
-  auto resultTensorType = cast<RankedTensorType>(op->getResult(0).getType());
+  auto resultTensorType =
+      dyn_cast<RankedTensorType>(op->getResult(0).getType());
+  if (!resultTensorType)
+    return kDefaultDistTileSize;
+
+  if (!resultTensorType.hasStaticShape())
+    return kDefaultDistTileSize;
 
   // FIXME: support 2D shapes too
   // This is a bit complicated since it needs a reshape in some cases.
