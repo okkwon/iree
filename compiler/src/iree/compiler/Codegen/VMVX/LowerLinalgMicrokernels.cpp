@@ -921,6 +921,176 @@ struct LinalgFillConversion : public OpRewritePattern<linalg::FillOp> {
   }
 };
 
+bool isTruncI8ToI1AndUIToFP32(linalg::GenericOp op) {
+  auto &children = op.getBlock()->getOperations();
+  // Match three children
+  // %trunc = arith.trunci %in : i8 to i1
+  // %uitofp = arith.uitofp %trunc : i1 to f32
+  // linalg.yield %uitofp : f32
+
+  if (children.size() != 3)
+    return false;
+
+  if (op.getNumDpsInputs() != 1)
+    return false;
+
+  // Already bufferized, so the op does not return anything.
+  if (op.getNumResults() != 0)
+    return false;
+
+  if (!op.getMatchingIndexingMap(op.getDpsInputOperand(0)).isIdentity())
+    return false;
+
+  // Only match parallel loops.
+  if (op.getNumParallelLoops() != op.getNumLoops())
+    return false;
+
+  auto iter = children.begin();
+
+  if (auto truncIOp = dyn_cast<arith::TruncIOp>(*iter++)) {
+    if (auto uiToFPIOp = dyn_cast<arith::UIToFPOp>(*iter++)) {
+      if (auto yieldOp = dyn_cast<linalg::YieldOp>(*iter++)) {
+        // Check types.
+        if (!truncIOp.getOperand().getType().isInteger(8))
+          return false;
+        if (!truncIOp.getResult().getType().isInteger(1))
+          return false;
+        if (!uiToFPIOp.getResult().getType().isF32())
+          return false;
+
+        // Check graph
+        if (yieldOp.getOperand(0).getDefiningOp() != uiToFPIOp)
+          return false;
+        if (uiToFPIOp.getOperand().getDefiningOp() != truncIOp)
+          return false;
+
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool isCmpIEQI32AndExtUII8(linalg::GenericOp op) {
+  auto &children = op.getBlock()->getOperations();
+  // Match three children
+  // %cmp = arith.cmpi eq %in0, %in1 : i8 to i1
+  // %extui = arith.extui %cmp : i1 to i8
+  // linalg.yield %extui : i8
+
+  if (children.size() != 3)
+    return false;
+
+  if (op.getNumDpsInputs() != 2)
+    return false;
+
+  // Already bufferized, so the op does not return anything.
+  if (op.getNumResults() != 0)
+    return false;
+
+  if (!op.getMatchingIndexingMap(op.getDpsInputOperand(0)).isIdentity())
+    return false;
+
+  // Only match parallel loops.
+  if (op.getNumParallelLoops() != op.getNumLoops())
+    return false;
+
+  auto iter = children.begin();
+
+  if (auto cmpIOp = dyn_cast<arith::CmpIOp>(*iter++)) {
+    if (auto extUIOp = dyn_cast<arith::ExtUIOp>(*iter++)) {
+      if (auto yieldOp = dyn_cast<linalg::YieldOp>(*iter++)) {
+
+        // Check types.
+        if (!cmpIOp.getOperand(0).getType().isInteger(32))
+          return false;
+        if (!extUIOp.getResult().getType().isInteger(8))
+          return false;
+
+        // Check the opcode
+        if (cmpIOp.getPredicate() != arith::CmpIPredicate::eq)
+          return false;
+
+        // Check graph
+        if (yieldOp.getOperand(0).getDefiningOp() != extUIOp)
+          return false;
+        if (extUIOp.getOperand().getDefiningOp() != cmpIOp)
+          return false;
+
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Find the latest GenericOp that uses the given operand as outs.
+FailureOr<linalg::GenericOp> findPrevDefiningGenericOp(linalg::GenericOp op,
+                                                       Value val) {
+  Operation *operation = op.getOperation();
+  Block *block = operation->getBlock();
+
+  auto iter = block->rbegin();
+  while (&*iter != operation)
+    iter++;
+
+  for (; iter != block->rend(); iter++) {
+    if (auto genericOp = dyn_cast<linalg::GenericOp>(*iter)) {
+      for (Value dpsInit : genericOp.getDpsInits()) {
+        if (dpsInit == val) {
+          return genericOp;
+        }
+      }
+    }
+  }
+  return failure();
+}
+
+struct LinalgCmpEqToF32Conversion : public OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(linalg::GenericOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!isTruncI8ToI1AndUIToFP32(op))
+      return failure();
+
+    auto inputVal = op.getOperand(0);
+
+    // Find the previous genericOp that uses inputOp as output.
+    auto prevGenericOpOr = findPrevDefiningGenericOp(op, inputVal);
+    if (failed(prevGenericOpOr))
+      return failure();
+
+    linalg::GenericOp prevGenericOp = *prevGenericOpOr;
+
+    if (!isCmpIEQI32AndExtUII8(prevGenericOp))
+      return failure();
+
+    // The patten is matched.
+    auto selection = BinaryEmitter::OpSelection::genericBinary("cmpi_eq_f32");
+
+    OpOperand *operand0 = &prevGenericOp->getOpOperand(0);
+    OpOperand *operand1 = &prevGenericOp->getOpOperand(1);
+    OpOperand *result = op.getDpsInitOperand(0);
+
+    auto emitter = BinaryEmitter(
+        BinaryEmitter::Descriptor(
+            operand0->get(), prevGenericOp.getMatchingIndexingMap(operand0)),
+        BinaryEmitter::Descriptor(
+            operand1->get(), prevGenericOp.getMatchingIndexingMap(operand1)),
+        BinaryEmitter::Descriptor(result->get(),
+                                  op.getMatchingIndexingMap(result)),
+        selection);
+
+    if (failed(emitter.initialize(op.getLoc(), rewriter)))
+      return failure();
+
+    emitter.emit(op.getLoc(), rewriter);
+    rewriter.eraseOp(op);
+    rewriter.eraseOp(prevGenericOp);
+    return success();
+  }
+};
+
 } // namespace
 
 class VMVXLowerLinalgMicrokernelsPass
@@ -932,10 +1102,9 @@ class VMVXLowerLinalgMicrokernelsPass
 
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
-    patterns
-        .insert<LinalgBinaryGenericConversion, LinalgFillConversion,
-                LinalgTrivialGenericConversion, LinalgUnaryGenericConversion>(
-            &getContext());
+    patterns.insert<LinalgBinaryGenericConversion, LinalgCmpEqToF32Conversion,
+                    LinalgFillConversion, LinalgTrivialGenericConversion,
+                    LinalgUnaryGenericConversion>(&getContext());
 
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             std::move(patterns)))) {
@@ -945,9 +1114,9 @@ class VMVXLowerLinalgMicrokernelsPass
     if (warnOnUnconverted) {
       getOperation()->walk([](Operation *op) {
         if (llvm::isa<linalg::LinalgOp>(op)) {
-          auto diag = op->emitWarning(
-              "Linalg op not converted to microkernel and will be implemented "
-              "with fallback scalar loops");
+          auto diag = op->emitWarning("Linalg op not converted to "
+                                      "microkernel and will be implemented "
+                                      "with fallback scalar loops");
           diag.attachNote(op->getLoc()) << "unmatched op: " << *op;
         }
       });
