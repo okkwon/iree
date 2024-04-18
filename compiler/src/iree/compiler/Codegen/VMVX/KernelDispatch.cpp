@@ -28,6 +28,15 @@ static llvm::cl::opt<int> clNumberOfRuntimeThreads(
         "number of threads that are used to determine the tile sizes"),
     llvm::cl::init(4));
 
+/// Returns true if the genericOp is elementwise with a single output with
+/// the identity indexing map.
+static bool isElementWiseIdentity(linalg::GenericOp genericOp) {
+  return genericOp.getNumDpsInputs() >= 1 && genericOp.getNumDpsInits() == 1 &&
+         linalg::isElementwise(genericOp) &&
+         llvm::all_of(genericOp.getIndexingMapsArray(),
+                      [](AffineMap map) { return map.isIdentity(); });
+}
+
 static SmallVector<int64_t> getDefaultDistributionTileSizes(TilingInterface op,
                                                             int tileSize) {
   unsigned numLoops = op.getLoopIteratorTypes().size();
@@ -186,9 +195,49 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
       IREE::Codegen::DispatchLoweringPassPipeline::VMVXDefault);
 }
 
+LogicalResult tryElementwiseRootConfig(mlir::FunctionOpInterface entryPointFn,
+                                       linalg::GenericOp op) {
+  if (!isElementWiseIdentity(op)) {
+    return failure();
+  }
+
+  // Try to distribute the work from the outermost dimension by the number
+  // of threads.
+  Type resultType = op.getDpsInitOperand(0)->get().getType();
+  if (auto rankedType = dyn_cast<RankedTensorType>(resultType)) {
+    if (rankedType.hasStaticShape()) {
+      SmallVector<int64_t> shape(rankedType.getShape());
+      int64_t numThreads = clNumberOfRuntimeThreads;
+
+      // If the work is too small, process it by a single thread.
+      if (rankedType.getNumElements() >= 32) {
+        for (int dim = 0; dim < shape.size();) {
+          if (numThreads == 1)
+            break;
+          if (shape[dim] > 1) {
+            shape[dim] = shape[dim] / 2;
+            numThreads = numThreads / 2;
+          } else {
+            dim++;
+          }
+        }
+      }
+      TileSizesListType tileSizes = {shape};
+      return setOpConfigAndEntryPointFnTranslation(
+          entryPointFn, op, tileSizes,
+          IREE::Codegen::DispatchLoweringPassPipeline::VMVXDefault);
+    }
+  }
+  return failure();
+}
+
 static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
                                    linalg::GenericOp op) {
   assert(!getLoweringConfig(op) && "expected lowering_config is not set");
+
+  // Handle elementwise ops by distributing the work by the number of threads.
+  if (succeeded(tryElementwiseRootConfig(entryPointFn, op)))
+    return success();
 
   // Check if it is an elementwise tanh, which uses the xnnpack tanh
   // microkernel. The logic is to get the minimum tile size for the op and
