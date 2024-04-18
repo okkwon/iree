@@ -115,11 +115,13 @@ void buildGlobalOptimizationPassPipeline(
         return createDecomposeConcatPass(
             transformOptions.options.outerDimConcat);
       })
-      // We generalize certain named ops immediately before folding unit extent
-      // dims as the unit dim folding pass updates indexing maps and is better
-      // at working with generics. By this point we have already done any
-      // specialized raising and the op names are no longer useful.
+  // We generalize certain named ops immediately before folding unit extent
+  // dims as the unit dim folding pass updates indexing maps and is better
+  // at working with generics. By this point we have already done any
+  // specialized raising and the op names are no longer useful.
+#if 0
       .addPass(createGeneralizeLinalgNamedOpsPass)
+#endif
       .addPass(IREE::Flow::createFoldUnitExtentDimsPass)
       .addPredicatedPass(clEnableFuseSiluHorizontalMatmul,
                          createFuseSiluHorizontalMatmulPass)
@@ -160,7 +162,9 @@ void buildGlobalOptimizationPassPipeline(
   }
   // Generalize transposes and any other remaining named linalg ops that can
   // now be represented as generics.
+#if 0
   FunctionLikeNest(mainPassManager).addPass(createGeneralizeLinalgNamedOpsPass);
+#endif
 
   // Hoist loop invariants (e.g. from scf loops) with zero-trip-check.
   FunctionLikeNest(mainPassManager)
