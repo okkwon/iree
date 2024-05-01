@@ -39,7 +39,8 @@ void buildVMVXConfigurationPassPipeline(OpPassManager &passManager) {
   // ---------------------------------------------------------------------------
   // Tensor-level optimization, kernel dispatch and lower to buffers.
   // ---------------------------------------------------------------------------
-  addCommonTargetExecutablePreprocessingPasses(passManager);
+  addCommonTargetExecutablePreprocessingPasses(
+      passManager, /*useDecomposeSoftmaxFusion=*/false);
   FunctionLikeNest(passManager.nest<ModuleOp>()).addPass([&]() {
     return createCPUMaterializeEncodingPass();
   });
