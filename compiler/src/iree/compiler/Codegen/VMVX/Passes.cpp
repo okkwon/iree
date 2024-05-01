@@ -70,7 +70,7 @@ void addVMVXDefaultPassPipeline(OpPassManager &passManager,
   // Note that this must be done post-tiling because it changes the structure
   // of the dispatch region such that tiling is not always possible.
   if (enableUKernels && clEnableUKernelsDecomposeLinalgGeneric) {
-    passManager.nest<ModuleOp>().nest<func::FuncOp>().addPass(
+    nestedModulePM.addNestedPass<func::FuncOp>(
         createDecomposeLinalgGenericPass());
   }
 
