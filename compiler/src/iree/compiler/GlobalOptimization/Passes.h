@@ -104,6 +104,8 @@ std::unique_ptr<Pass> createRaiseSpecialOps();
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createRemoveZeroExtentTensorsPass();
 
+std::unique_ptr<Pass> createReshapeSoftmaxToNCPass();
+
 /// Sets encoding for tensors to allow tiled execution of operations.
 std::unique_ptr<Pass> createSetEncodingPass();
 

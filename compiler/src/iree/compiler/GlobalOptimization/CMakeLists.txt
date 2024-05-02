@@ -59,6 +59,7 @@ iree_cc_library(
     "PropagateLinalgTranspose.cpp"
     "RaiseSpecialOps.cpp"
     "RemoveZeroExtentTensors.cpp"
+    "ReshapeSoftmaxToNC.cpp"
     "SetEncoding.cpp"
     "SimplifyPackUnpack.cpp"
     "Utils.cpp"

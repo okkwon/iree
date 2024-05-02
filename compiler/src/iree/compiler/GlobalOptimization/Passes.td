@@ -118,6 +118,12 @@ def RemoveZeroExtentTensors :
   let constructor = "mlir::iree_compiler::GlobalOptimization::createRemoveZeroExtentTensorsPass()";
 }
 
+def ReshapeSoftmaxToNC:
+    Pass<"iree-global-opt-reshape-softmax-to-nc", ""> {
+  let summary = "Reshape linalg softmax ops to NC.";
+  let constructor = "mlir::iree_compiler::GlobalOptimization::createReshapeSoftmaxToNCPass()";
+}
+
 def SetEncoding : Pass<"iree-global-opt-set-encoding", ""> {
   let summary = "Introduces tensor encoding for compute operations";
   let constructor = "mlir::iree_compiler::GlobalOptimization::createSetEncodingPass()";

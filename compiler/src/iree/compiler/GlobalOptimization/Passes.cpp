@@ -241,6 +241,7 @@ void buildGlobalOptimizationPassPipeline(
       // After running const-eval to a fixed point and folding unit extent dims,
       // try any new raising opportunities.
       .addPass(createRaiseSpecialOps)
+      .addPass(createReshapeSoftmaxToNCPass)
       // Strip std.assert & co after we perform optimizations; prior to this we
       // may use the assertions to derive information during analysis.
       .addPredicatedPass(transformOptions.options.stripAssertions,
