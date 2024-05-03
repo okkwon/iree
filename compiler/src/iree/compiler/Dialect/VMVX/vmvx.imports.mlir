@@ -380,6 +380,7 @@ vm.import private @tanh.2d.f32(
   %out_strides : tuple<i64, i64>,
   %sizes : tuple<i64, i64>
 )
+
 //==============================================================================
 // Strided copy ops
 // Variants of copy ops exist for power of two rank and datatype sizes.
@@ -515,5 +516,28 @@ vm.import private @query_tile_sizes.2d(
   %size1 : i64,
   %flags : i32
 ) -> (i64, i64)
+
+//==============================================================================
+// reduction ops as unary op. The output's stride1 is always 0
+//==============================================================================
+vm.import private @reduce_max.2d.f32(
+  %in_buffer : !vm.buffer,
+  %in_offset : i64,
+  %in_strides : tuple<i64, i64>,
+  %out_buffer : !vm.buffer,
+  %out_offset : i64,
+  %out_strides : tuple<i64, i64>,
+  %sizes : tuple<i64, i64>
+)
+
+vm.import private @reduce_sum.2d.f32(
+  %in_buffer : !vm.buffer,
+  %in_offset : i64,
+  %in_strides : tuple<i64, i64>,
+  %out_buffer : !vm.buffer,
+  %out_offset : i64,
+  %out_strides : tuple<i64, i64>,
+  %sizes : tuple<i64, i64>
+)
 
 }  // module

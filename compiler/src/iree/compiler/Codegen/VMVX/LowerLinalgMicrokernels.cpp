@@ -14,6 +14,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -148,6 +149,7 @@ private:
   friend class StridedBufferAnalysis;
   MemRefType memRefType;
 };
+
 /// Holds the results of an analysis which indicates whether a given memref
 /// can be decomposed into fully known static or dynamic base, strides, offset
 /// and sizes. If this holds, then a StridedBufferDescriptor is guaranteed to
@@ -1091,6 +1093,124 @@ struct LinalgCmpEqToF32Conversion : public OpRewritePattern<linalg::GenericOp> {
   }
 };
 
+static bool isNCReduction(linalg::GenericOp op) {
+  // Check if it has single input.
+  if (op.getNumDpsInputs() != 1) {
+    return false;
+  }
+
+  auto input = op.getDpsInputOperand(0)->get();
+  auto inputType = cast<ShapedType>(input.getType());
+  if (!inputType.hasStaticShape()) {
+    return false;
+  }
+  // Check if the shame is 2D.
+  if (inputType.getRank() != 2) {
+    return false;
+  }
+  // Check if the shape is NC, where the reduction happens on the channel
+  // dimension.
+  auto iters = op.getIteratorTypesArray();
+  if (!linalg::isParallelIterator(iters[0]) ||
+      !linalg::isReductionIterator(iters[1])) {
+    return false;
+  }
+
+  // Expect to see (d0, d1) -> (d0, d1) for the input
+  auto inputMap = op.getMatchingIndexingMap(&op->getOpOperand(0));
+  if (!inputMap.isIdentity()) {
+    return false;
+  }
+  // Expect to see (d0, d1) -> (d0) for the output
+  auto outputMap = op.getMatchingIndexingMap(&op->getOpOperand(1));
+  if (outputMap.getNumResults() != 1 || outputMap.getDimPosition(0) != 0) {
+    // Reduction should happen at the innermost dim
+    return false;
+  }
+
+  auto &children = op.getBlock()->getOperations();
+  // Only match two children (op + yield).
+  if (children.size() != 2)
+    return false;
+
+  Operation *scalarOp = &children.front();
+  Operation *yieldOp = op.getBlock()->getTerminator();
+  if (scalarOp->getNumOperands() != 2 || yieldOp->getNumOperands() != 1 ||
+      yieldOp->getOperand(0) != scalarOp->getResult(0)) {
+    return false;
+  }
+
+  return true;
+}
+
+/// Matches a generic which contains a reduction.
+struct LinalgReduceNCConversion : public OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(linalg::GenericOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!isNCReduction(op)) {
+      return rewriter.notifyMatchFailure(op, "Expected a reduction for NC.");
+    }
+
+    // Construct the emitter and start lowering.
+    // Note that the operands may map to an out if the aliasing is safe,
+    // so we use getOpOperand() vs restricting to just the generic ins.
+    OpOperand *operand0 = &op->getOpOperand(0);
+    OpOperand *result = op.getDpsInitOperand(0);
+
+    // Returns an emitter for a generic binary compatible operation where
+    // |binaryOp| has a 1:1 correspondance with |opcode|.
+    auto configureGenericUnary =
+        [&](Operation *unaryOp,
+            StringRef opcode) -> std::optional<UnaryEmitter> {
+      // Make sure that the binary op has operands that map to the
+      // ins and detect the order.
+      auto selection = UnaryEmitter::OpSelection::genericUnary(opcode);
+      return UnaryEmitter(
+          UnaryEmitter::Descriptor(operand0->get(),
+                                   op.getMatchingIndexingMap(operand0)),
+          UnaryEmitter::Descriptor(result->get(),
+                                   op.getMatchingIndexingMap(result)),
+          selection);
+    };
+
+    // Select the op to lower to and configure the emitter.
+    // Emit from the iree_ukernel_x32b_opcode_t table.
+    auto &children = op.getBlock()->getOperations();
+    Operation *scalarOp = &children.front();
+    Type resultType = scalarOp->getResult(0).getType();
+    if (!resultType.isIntOrFloat())
+      return failure();
+
+    std::optional<UnaryEmitter> emitter =
+        TypeSwitch<Operation *, std::optional<UnaryEmitter>>(scalarOp)
+            .Case([&](arith::AddFOp op) -> std::optional<UnaryEmitter> {
+              if (resultType.getIntOrFloatBitWidth() == 32) {
+                return configureGenericUnary(op, "reduce_sum");
+              }
+              return std::nullopt;
+            })
+            .Case([&](arith::MaximumFOp op) -> std::optional<UnaryEmitter> {
+              if (resultType.getIntOrFloatBitWidth() == 32) {
+                return configureGenericUnary(op, "reduce_max");
+              }
+              return std::nullopt;
+            })
+            .Default([](Operation *) { return std::nullopt; });
+
+    // Determine op type to lower to.
+    if (!emitter) {
+      return rewriter.notifyMatchFailure(op, "unrecognized unary op");
+    }
+    if (failed(emitter->initialize(op.getLoc(), rewriter)))
+      return failure();
+
+    emitter->emit(op.getLoc(), rewriter);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 } // namespace
 
 class VMVXLowerLinalgMicrokernelsPass
@@ -1104,7 +1224,8 @@ class VMVXLowerLinalgMicrokernelsPass
     RewritePatternSet patterns(&getContext());
     patterns.insert<LinalgBinaryGenericConversion, LinalgCmpEqToF32Conversion,
                     LinalgFillConversion, LinalgTrivialGenericConversion,
-                    LinalgUnaryGenericConversion>(&getContext());
+                    LinalgReduceNCConversion, LinalgUnaryGenericConversion>(
+        &getContext());
 
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             std::move(patterns)))) {

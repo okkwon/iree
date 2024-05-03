@@ -95,6 +95,10 @@ DECLARE_UKERNEL_UNARY_2D(negf, iree_uk_uint32_t, x32u);
 DECLARE_UKERNEL_UNARY_2D(rsqrtf, iree_uk_uint32_t, x32u);
 DECLARE_UKERNEL_UNARY_2D(tanhf, iree_uk_uint32_t, x32u);
 
+// Reduction Unary Ops
+DECLARE_UKERNEL_UNARY_2D(reduce_maxf, iree_uk_uint32_t, x32u);
+DECLARE_UKERNEL_UNARY_2D(reduce_sumf, iree_uk_uint32_t, x32u);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

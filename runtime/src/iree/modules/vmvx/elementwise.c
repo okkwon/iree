@@ -348,4 +348,64 @@ IREE_UK_EXPORT int iree_uk_x32u_tanhf_2d(
 
   return 0;
 }
-#endif  // USE_TANH_UKERNEL
+#endif  // USE_XNNPACK_UKERNEL
+
+static void iree_uk_reduce_maxf_vector(iree_uk_index_t n, const float* in,
+                                       float* IREE_UK_RESTRICT out) {
+  if (n == 0) {
+    return;
+  }
+
+  *out = in[0];
+
+  for (iree_uk_index_t i = 1; i < n; ++i) {
+    if (in[i] > *out) {
+      *out = in[i];
+    }
+  }
+}
+
+static void iree_uk_reduce_sumf_vector(iree_uk_index_t n, const float* in,
+                                       float* IREE_UK_RESTRICT out) {
+  if (n == 0) {
+    return;
+  }
+
+  *out = in[0];
+
+  for (iree_uk_index_t i = 1; i < n; ++i) {
+    *out += in[i];
+  }
+}
+
+// Reduction Unary Ops
+#define DISPATCH_UKERNEL_REDUCE_UNARY_2D(opcode)                           \
+  IREE_UK_EXPORT int iree_uk_x32u_reduce_##opcode##_2d(                    \
+      const iree_uk_uint32_t* in, iree_uk_index_t in_offset,               \
+      iree_uk_index_t in_stride0, iree_uk_index_t in_stride1,              \
+      iree_uk_uint32_t* IREE_UK_RESTRICT out, iree_uk_index_t out_offset,  \
+      iree_uk_index_t out_stride0, iree_uk_index_t out_stride1,            \
+      iree_uk_index_t size0, iree_uk_index_t size1) {                      \
+    if (out_stride1 != 0) {                                                \
+      /* The output buffer is supposed to be a 1D batch. */                \
+      return 1;                                                            \
+    }                                                                      \
+    if (in_stride1 != 1) {                                                 \
+      /* Expects to have contiguous input elements. */                     \
+      return 1;                                                            \
+    }                                                                      \
+    if (out_stride0 != 1) {                                                \
+      /* Expects to have contiguous output elements. */                    \
+      return 1;                                                            \
+    }                                                                      \
+    in = &in[in_offset];                                                   \
+    out = &out[out_offset];                                                \
+    for (iree_uk_index_t i = 0; i < size0; ++i) {                          \
+      iree_uk_reduce_##opcode##_vector(size1, (float*)&in[i * in_stride0], \
+                                       (float*)&out[i * out_stride0]);     \
+    }                                                                      \
+    return 0;                                                              \
+  }
+
+DISPATCH_UKERNEL_REDUCE_UNARY_2D(maxf)
+DISPATCH_UKERNEL_REDUCE_UNARY_2D(sumf)
