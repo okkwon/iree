@@ -11,13 +11,16 @@
 namespace mlir::iree_compiler {
 
 void addCommonTargetExecutablePreprocessingPasses(
-    OpPassManager &passManager, bool useDecomposeSoftmaxFusion) {
+    OpPassManager &passManager, bool decomposeSoftmax,
+    bool useDecomposeSoftmaxFusion) {
   OpPassManager &nestedModulePM = passManager.nest<ModuleOp>();
   nestedModulePM.addNestedPass<func::FuncOp>(createTypePropagationPass());
   nestedModulePM.addPass(createBubbleUpOrdinalOpsPass());
   nestedModulePM.addPass(createBufferizeCopyOnlyDispatchesPass());
-  nestedModulePM.addNestedPass<func::FuncOp>(
-      createDecomposeSoftmaxPass(useDecomposeSoftmaxFusion));
+  if (decomposeSoftmax) {
+    nestedModulePM.addNestedPass<func::FuncOp>(
+        createDecomposeSoftmaxPass(useDecomposeSoftmaxFusion));
+  }
   passManager.addPass(createMaterializeUserConfigsPass());
 }
 

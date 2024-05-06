@@ -29,7 +29,8 @@ void registerTransformDialectTranslationDependentDialects(
 /// Passes that are done on all backends before target-specific code-generation
 /// kicks in.
 void addCommonTargetExecutablePreprocessingPasses(
-    OpPassManager &passManager, bool useDecomposeSoftmaxFusion = true);
+    OpPassManager &passManager, bool decomposeSoftmax = true,
+    bool useDecomposeSoftmaxFusion = true);
 
 /// Post-bufferization passes run to cleanup the IR
 /// (ResolveShapedTypeResultDims, Canonicalization/CSE and

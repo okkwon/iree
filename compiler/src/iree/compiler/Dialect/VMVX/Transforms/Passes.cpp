@@ -39,8 +39,12 @@ void buildVMVXConfigurationPassPipeline(OpPassManager &passManager) {
   // ---------------------------------------------------------------------------
   // Tensor-level optimization, kernel dispatch and lower to buffers.
   // ---------------------------------------------------------------------------
+  // TODO: use a command line option to control the Softmax
+  // decomposition and fusion, which should be only effective when
+  // `--iree-vmvx-enable-microkernels` is set.
   addCommonTargetExecutablePreprocessingPasses(
-      passManager, /*useDecomposeSoftmaxFusion=*/false);
+      passManager, /*decomposeSoftmax=*/true,
+      /*useDecomposeSoftmaxFusion=*/false);
   FunctionLikeNest(passManager.nest<ModuleOp>()).addPass([&]() {
     return createCPUMaterializeEncodingPass();
   });
