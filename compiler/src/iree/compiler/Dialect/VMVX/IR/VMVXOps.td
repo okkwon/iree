@@ -103,7 +103,7 @@ def VMVX_BinaryOp : VMVX_Op<"binary", [SameVariadicOperandSize]> {
       OUT = OP(LHS, RHS)
     ```
 
-    Where `OP` is a concrete operation name as defined in ukernel/elementwise.h
+    Where `OP` is a concrete operation name as defined in vmvx/elementwise.h
   }];
   let arguments = (ins
     // Corresponds to lower-cased opcode suffix of a ukernel binary op.
@@ -197,7 +197,7 @@ def VMVX_UnaryOp : VMVX_Op<"unary", [SameVariadicOperandSize]> {
       OUT = OP(IN)
     ```
 
-    Where `OP` is a concrete operation name as defined in ukernel/elementwise.h
+    Where `OP` is a concrete operation name as defined in vmvx/elementwise.h
   }];
   let arguments = (ins
     // Corresponds to lower-cased opcode suffix of a ukernel unary op.
