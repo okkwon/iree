@@ -91,6 +91,30 @@ struct BatchMmt4DOpPartitionableLoops
   }
 };
 
+/// External model implementation for linalg::SoftmaxOp.
+struct SoftmaxOpPartitionableLoops
+    : public PartitionableLoopsInterface::ExternalModel<
+          SoftmaxOpPartitionableLoops, linalg::SoftmaxOp> {
+  llvm::SmallVector<unsigned>
+  getPartitionableLoops(Operation *op,
+                        std::optional<unsigned> maxNumPartitionedLoops) const {
+    auto softmaxOp = cast<linalg::SoftmaxOp>(op);
+    auto inputType = softmaxOp.getInputOperandType();
+
+    llvm::SmallVector<unsigned> parallelLoops;
+    auto dimension = softmaxOp.getDimension();
+    for (int64_t i = 0; i < inputType.getRank(); ++i) {
+      if (maxNumPartitionedLoops && i >= *maxNumPartitionedLoops)
+        break;
+
+      if (i != dimension) {
+        parallelLoops.push_back(i);
+      }
+    }
+    return parallelLoops;
+  }
+};
+
 /// External model implementation for all operations to make only
 /// the outer parallel loops as partitionable.
 template <typename OpTy>
@@ -213,6 +237,11 @@ void registerInterfaceForLinalgOps<linalg::BatchMmt4DOp>(MLIRContext *ctx) {
   linalg::BatchMmt4DOp::attachInterface<BatchMmt4DOpPartitionableLoops>(*ctx);
 }
 
+template <>
+void registerInterfaceForLinalgOps<linalg::SoftmaxOp>(MLIRContext *ctx) {
+  linalg::SoftmaxOp::attachInterface<SoftmaxOpPartitionableLoops>(*ctx);
+}
+
 /// Registers the external models for all Linalg operations.
 template <typename OpTy1, typename OpTy2, typename... More>
 static void registerInterfaceForLinalgOps(MLIRContext *ctx) {
@@ -228,6 +257,7 @@ void registerPartitionableLoopsInterfaceModels(DialectRegistry &registry) {
     registerInterfaceForLinalgOps<
 #include "mlir/Dialect/Linalg/IR/LinalgStructuredOps.cpp.inc"
         >(ctx);
+    registerInterfaceForLinalgOps<linalg::SoftmaxOp>(ctx);
   });
 
   registry.insert<IREE::LinalgExt::IREELinalgExtDialect>();
