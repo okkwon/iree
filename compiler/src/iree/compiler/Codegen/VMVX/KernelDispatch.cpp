@@ -13,6 +13,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 
@@ -39,6 +40,22 @@ static bool isElementWiseIdentity(linalg::GenericOp genericOp) {
 
 static SmallVector<int64_t> getDefaultDistributionTileSizes(TilingInterface op,
                                                             int tileSize) {
+  unsigned numLoops = op.getLoopIteratorTypes().size();
+  auto partitionedLoops = cast<PartitionableLoopsInterface>(op.getOperation())
+                              .getPartitionableLoops(kNumMaxParallelDims);
+  SmallVector<int64_t> distTileSizes(numLoops, tileSize);
+  llvm::DenseSet<unsigned> partitionedLoopsSet(partitionedLoops.begin(),
+                                               partitionedLoops.end());
+  for (auto dim : llvm::seq<int64_t>(0, distTileSizes.size())) {
+    if (!partitionedLoopsSet.count(dim))
+      distTileSizes[dim] = 0;
+  }
+
+  return distTileSizes;
+}
+
+static SmallVector<int64_t>
+getDefaultDistributionTileSizes(linalg::SoftmaxOp op, int tileSize) {
   unsigned numLoops = op.getLoopIteratorTypes().size();
   auto partitionedLoops = cast<PartitionableLoopsInterface>(op.getOperation())
                               .getPartitionableLoops(kNumMaxParallelDims);
@@ -273,6 +290,29 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
       IREE::Codegen::DispatchLoweringPassPipeline::VMVXDefault);
 }
 
+static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
+                                   linalg::SoftmaxOp op) {
+  assert(!getLoweringConfig(op) && "expected lowering_config is not set");
+
+  auto input = op.getInput();
+  auto inputType = input.getType();
+
+  if (!inputType.hasStaticShape() || inputType.getRank() != 2 ||
+      op.getDimension() != 1) {
+    return failure();
+  }
+
+  auto batchSize = inputType.getShape()[0];
+  int64_t batchDist = batchSize / clNumberOfRuntimeThreads;
+  batchDist = llvm::alignTo(batchDist, 32);
+  SmallVector<int64_t> distTileSizes = {batchDist, 0};
+
+  TileSizesListType tileSizes = {distTileSizes};
+  return setOpConfigAndEntryPointFnTranslation(
+      entryPointFn, op, tileSizes,
+      IREE::Codegen::DispatchLoweringPassPipeline::VMVXDefault);
+}
+
 static LogicalResult
 setVMVXRootConfigImpl(mlir::FunctionOpInterface entryPointFn, Operation *op) {
   auto setRootConfigFn = [&](Operation *op) -> LogicalResult {
@@ -280,6 +320,8 @@ setVMVXRootConfigImpl(mlir::FunctionOpInterface entryPointFn, Operation *op) {
         .Case<linalg::GenericOp>(
             [&](auto op) { return setRootConfig(entryPointFn, op); })
         .Case<IREE::LinalgExt::FftOp>(
+            [&](auto op) { return setRootConfig(entryPointFn, op); })
+        .Case<linalg::SoftmaxOp>(
             [&](auto op) { return setRootConfig(entryPointFn, op); })
         .Case<TilingInterface>(
             [&](auto op) { return setRootConfig(entryPointFn, op); })
