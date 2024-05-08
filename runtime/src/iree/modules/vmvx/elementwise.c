@@ -398,8 +398,6 @@ static void iree_uk_reduce_sumf_vector(iree_uk_index_t n, const float* in,
       /* Expects to have contiguous output elements. */                    \
       return 1;                                                            \
     }                                                                      \
-    in = &in[in_offset];                                                   \
-    out = &out[out_offset];                                                \
     for (iree_uk_index_t i = 0; i < size0; ++i) {                          \
       iree_uk_reduce_##opcode##_vector(size1, (float*)&in[i * in_stride0], \
                                        (float*)&out[i * out_stride0]);     \
@@ -409,3 +407,25 @@ static void iree_uk_reduce_sumf_vector(iree_uk_index_t n, const float* in,
 
 DISPATCH_UKERNEL_REDUCE_UNARY_2D(maxf)
 DISPATCH_UKERNEL_REDUCE_UNARY_2D(sumf)
+
+IREE_UK_EXPORT int iree_uk_x32u_softmaxf_2d(
+    const iree_uk_uint32_t* in, iree_uk_index_t in_offset,
+    iree_uk_index_t in_stride0, iree_uk_index_t in_stride1,
+    iree_uk_uint32_t* IREE_UK_RESTRICT out, iree_uk_index_t out_offset,
+    iree_uk_index_t out_stride0, iree_uk_index_t out_stride1,
+    iree_uk_index_t size0, iree_uk_index_t size1) {
+  if (out_stride1 != 1) {
+    // Expects to have contiguous output elements
+    return 1;
+  }
+  if (in_stride1 != 1) {
+    // Expects to have contiguous input elements.
+    return 1;
+  }
+
+  for (iree_uk_index_t i = 0; i < size0; ++i) {
+    xnn_run_tile_softmax_nc_f32(size1, (float*)&in[i * in_stride0],
+                                (float*)&out[i * out_stride0]);
+  }
+  return 0;
+}

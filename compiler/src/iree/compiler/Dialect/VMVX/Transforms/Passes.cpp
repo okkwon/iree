@@ -43,7 +43,7 @@ void buildVMVXConfigurationPassPipeline(OpPassManager &passManager) {
   // decomposition and fusion, which should be only effective when
   // `--iree-vmvx-enable-microkernels` is set.
   addCommonTargetExecutablePreprocessingPasses(
-      passManager, /*decomposeSoftmax=*/true,
+      passManager, /*decomposeSoftmax=*/false,
       /*useDecomposeSoftmaxFusion=*/false);
   FunctionLikeNest(passManager.nest<ModuleOp>()).addPass([&]() {
     return createCPUMaterializeEncodingPass();

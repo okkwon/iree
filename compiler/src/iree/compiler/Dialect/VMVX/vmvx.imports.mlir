@@ -540,4 +540,17 @@ vm.import private @reduce_sum.2d.f32(
   %sizes : tuple<i64, i64>
 )
 
+//==============================================================================
+// softmax op as unary op. The output's stride1 is always 0
+//==============================================================================
+vm.import private @softmax.2d.f32(
+  %in_buffer : !vm.buffer,
+  %in_offset : i64,
+  %in_strides : tuple<i64, i64>,
+  %out_buffer : !vm.buffer,
+  %out_offset : i64,
+  %out_strides : tuple<i64, i64>,
+  %sizes : tuple<i64, i64>
+)
+
 }  // module

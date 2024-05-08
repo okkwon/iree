@@ -1211,6 +1211,68 @@ struct LinalgReduceNCConversion : public OpRewritePattern<linalg::GenericOp> {
   }
 };
 
+/// Matches a softmax with NC.
+struct LinalgSoftmaxConversion : public OpRewritePattern<linalg::SoftmaxOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(linalg::SoftmaxOp op,
+                                PatternRewriter &rewriter) const override {
+    auto input = op.getInput();
+    auto inputType = input.getType();
+    if (!inputType.hasStaticShape()) {
+      // TODO: support dynamic shapes.
+      return rewriter.notifyMatchFailure(op, "Expected a static shape");
+    }
+
+    if (!inputType.getElementType().isF32()) {
+      // TODO: support other types
+      return rewriter.notifyMatchFailure(op, "Expected the float type");
+    }
+
+    if (inputType.getRank() != 2) {
+      return rewriter.notifyMatchFailure(op, "Expected a 2D softmax");
+    }
+
+    if (op.getDimension() != 1) {
+      return rewriter.notifyMatchFailure(
+          op, "Expected Softmax is done at the innermost dimension");
+    }
+
+    // Construct the emitter and start lowering.
+    // Note that the operands may map to an out if the aliasing is safe,
+    // so we use getOpOperand() vs restricting to just the generic ins.
+    OpOperand *operand0 = &op->getOpOperand(0);
+    OpOperand *result = op.getDpsInitOperand(0);
+
+    // Returns an emitter for a generic unary compatible operation where
+    // |unaryOp| has a 1:1 correspondance with |opcode|.
+    auto configureGenericUnary =
+        [&](Operation *unaryOp,
+            StringRef opcode) -> std::optional<UnaryEmitter> {
+      // Make sure that the binary op has operands that map to the
+      // ins and detect the order.
+      auto selection = UnaryEmitter::OpSelection::genericUnary(opcode);
+      auto identityMap =
+          AffineMap::getMultiDimIdentityMap(2, rewriter.getContext());
+      return UnaryEmitter(
+          UnaryEmitter::Descriptor(operand0->get(), identityMap),
+          UnaryEmitter::Descriptor(result->get(), identityMap), selection);
+    };
+
+    std::optional<UnaryEmitter> emitter = configureGenericUnary(op, "softmax");
+
+    // Determine op type to lower to.
+    if (!emitter) {
+      return rewriter.notifyMatchFailure(op, "unrecognized unary op");
+    }
+    if (failed(emitter->initialize(op.getLoc(), rewriter)))
+      return failure();
+
+    emitter->emit(op.getLoc(), rewriter);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 } // namespace
 
 class VMVXLowerLinalgMicrokernelsPass
@@ -1224,8 +1286,8 @@ class VMVXLowerLinalgMicrokernelsPass
     RewritePatternSet patterns(&getContext());
     patterns.insert<LinalgBinaryGenericConversion, LinalgCmpEqToF32Conversion,
                     LinalgFillConversion, LinalgTrivialGenericConversion,
-                    LinalgReduceNCConversion, LinalgUnaryGenericConversion>(
-        &getContext());
+                    LinalgReduceNCConversion, LinalgSoftmaxConversion,
+                    LinalgUnaryGenericConversion>(&getContext());
 
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             std::move(patterns)))) {
