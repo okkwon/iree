@@ -1026,6 +1026,79 @@ bool isCmpIEQI32AndExtUII8(linalg::GenericOp op) {
   return false;
 }
 
+static bool allIndexingsAreIdentity(linalg::LinalgOp op) {
+  return llvm::all_of(op.getIndexingMapsArray(),
+                      [](AffineMap m) { return m.isIdentity(); });
+}
+
+static bool isSimpleElementwise(linalg::GenericOp op) {
+  if (op.getNumLoops() != op.getNumParallelLoops())
+    return false;
+  if (!allIndexingsAreIdentity(op))
+    return false;
+  if (!linalg::hasOnlyScalarElementwiseOp(op->getRegion(0)))
+    return false;
+  return true;
+}
+
+bool isUItoFP(linalg::GenericOp op, int intWidth, int floatWidth) {
+  if (!isSimpleElementwise(op))
+    return false;
+
+  Operation *scalarOp = &op.getBlock()->getOperations().front();
+  if (auto uitofpOp = dyn_cast<arith::UIToFPOp>(scalarOp)) {
+    if (!uitofpOp.getIn().getType().isInteger(intWidth))
+      return false;
+    if (uitofpOp.getOut().getType().getIntOrFloatBitWidth() != floatWidth)
+      return false;
+    return true;
+  }
+  return false;
+}
+
+bool isTrunc(linalg::GenericOp op, int inWidth, int outWidth) {
+  if (!isSimpleElementwise(op))
+    return false;
+
+  Operation *scalarOp = &op.getBlock()->getOperations().front();
+  if (auto truncOp = dyn_cast<arith::TruncIOp>(scalarOp)) {
+    if (!truncOp.getIn().getType().isInteger(inWidth))
+      return false;
+    if (!truncOp.getOut().getType().isInteger(outWidth))
+      return false;
+    return true;
+  }
+  return false;
+}
+
+bool isExtUI(linalg::GenericOp op, int inWidth, int outWidth) {
+  if (!isSimpleElementwise(op))
+    return false;
+
+  Operation *scalarOp = &op.getBlock()->getOperations().front();
+  if (auto extuiOp = dyn_cast<arith::ExtUIOp>(scalarOp)) {
+    if (!extuiOp.getIn().getType().isInteger(inWidth))
+      return false;
+    if (!extuiOp.getOut().getType().isInteger(outWidth))
+      return false;
+    return true;
+  }
+  return false;
+}
+
+bool isCmpI(linalg::GenericOp op, int inWidth) {
+  if (!isSimpleElementwise(op))
+    return false;
+
+  Operation *scalarOp = &op.getBlock()->getOperations().front();
+  if (auto cmpIOp = dyn_cast<arith::CmpIOp>(scalarOp)) {
+    if (!cmpIOp.getOperand(0).getType().isInteger(inWidth))
+      return false;
+    return true;
+  }
+  return false;
+}
+
 // Find the latest GenericOp that uses the given operand as outs.
 FailureOr<linalg::GenericOp> findPrevDefiningGenericOp(linalg::GenericOp op,
                                                        Value val) {
@@ -1089,6 +1162,69 @@ struct LinalgCmpEqToF32Conversion : public OpRewritePattern<linalg::GenericOp> {
     emitter.emit(op.getLoc(), rewriter);
     rewriter.eraseOp(op);
     rewriter.eraseOp(prevGenericOp);
+    return success();
+  }
+};
+
+struct LinalgCmpI32ExtUI8TruncI1UItoFP32Conversion
+    : public OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(linalg::GenericOp op,
+                                PatternRewriter &rewriter) const override {
+    // Check if the scalar op is arith.uitofp %in : i1 to f32
+    if (!isUItoFP(op, /*intWidth=*/1, /*floatWidth=*/32))
+      return failure();
+
+    // Check if the scalar op is arith.trunci %in : i8 to i1
+    auto prevGenericOpOr = findPrevDefiningGenericOp(op, op.getOperand(0));
+    if (failed(prevGenericOpOr))
+      return failure();
+    if (!isTrunc(*prevGenericOpOr, /*inWidth=*/8, /*outWidth=*/1))
+      return failure();
+    auto truncGenericOp = *prevGenericOpOr;
+
+    // Check if the scalar op is arith.extui %in : i1 to i8
+    prevGenericOpOr =
+        findPrevDefiningGenericOp(truncGenericOp, truncGenericOp.getOperand(0));
+    if (failed(prevGenericOpOr))
+      return failure();
+    if (!isExtUI(*prevGenericOpOr, /*inWidth=*/1, /*outWidth=*/8))
+      return failure();
+    auto extUIGenericOp = *prevGenericOpOr;
+
+    // Check if the scalar op is arith.cmpi %a, %b : i32
+    prevGenericOpOr =
+        findPrevDefiningGenericOp(extUIGenericOp, extUIGenericOp.getOperand(0));
+    if (failed(prevGenericOpOr))
+      return failure();
+    if (!isCmpI(*prevGenericOpOr, /*inWidth=*/32))
+      return failure();
+    auto cmpIGenericOp = *prevGenericOpOr;
+
+    // The patten is matched.
+    auto selection = BinaryEmitter::OpSelection::genericBinary("cmpi_eq_f32");
+
+    OpOperand *operand0 = &cmpIGenericOp->getOpOperand(0);
+    OpOperand *operand1 = &cmpIGenericOp->getOpOperand(1);
+    OpOperand *result = op.getDpsInitOperand(0);
+
+    auto emitter = BinaryEmitter(
+        BinaryEmitter::Descriptor(
+            operand0->get(), cmpIGenericOp.getMatchingIndexingMap(operand0)),
+        BinaryEmitter::Descriptor(
+            operand1->get(), cmpIGenericOp.getMatchingIndexingMap(operand1)),
+        BinaryEmitter::Descriptor(result->get(),
+                                  op.getMatchingIndexingMap(result)),
+        selection);
+
+    if (failed(emitter.initialize(op.getLoc(), rewriter)))
+      return failure();
+
+    emitter.emit(op.getLoc(), rewriter);
+    rewriter.eraseOp(op);
+    rewriter.eraseOp(truncGenericOp);
+    rewriter.eraseOp(extUIGenericOp);
+    rewriter.eraseOp(cmpIGenericOp);
     return success();
   }
 };
@@ -1285,6 +1421,7 @@ class VMVXLowerLinalgMicrokernelsPass
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
     patterns.insert<LinalgBinaryGenericConversion, LinalgCmpEqToF32Conversion,
+                    LinalgCmpI32ExtUI8TruncI1UItoFP32Conversion,
                     LinalgFillConversion, LinalgTrivialGenericConversion,
                     LinalgReduceNCConversion, LinalgSoftmaxConversion,
                     LinalgUnaryGenericConversion>(&getContext());
