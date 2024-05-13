@@ -553,4 +553,22 @@ vm.import private @softmax.2d.f32(
   %sizes : tuple<i64, i64>
 )
 
+//==============================================================================
+// topk op
+//==============================================================================
+vm.import private @topk.2d.f32(
+  %in_buffer : !vm.buffer,
+  %in_offset : i64,
+  %in_strides : tuple<i64, i64>,
+  %out0_buffer : !vm.buffer,
+  %out0_offset : i64,
+  %out0_strides : tuple<i64, i64>,
+  %out1_buffer : !vm.buffer,
+  %out1_offset : i64,
+  %out1_strides : tuple<i64, i64>,
+  %n : i64,
+  %d : i64,
+  %k : i64
+)
+
 }  // module

@@ -159,6 +159,18 @@ public:
   }
 };
 
+// Converts the vmvx.fill2d op to an appropriate typed import.
+class TopkOpConversion : public VMVXImportOpConversion<IREE::VMVX::TopkOp> {
+public:
+  using VMVXImportOpConversion::VMVXImportOpConversion;
+
+  std::string getImportFqName(IREE::VMVX::TopkOp op) const override {
+    std::string name("vmvx.topk.2d.");
+    name.append(getTypedTypeStr(op.getElementType()));
+    return name;
+  }
+};
+
 class UnaryOpConversion : public VMVXImportOpConversion<IREE::VMVX::UnaryOp> {
 public:
   using VMVXImportOpConversion::VMVXImportOpConversion;
@@ -183,7 +195,8 @@ void populateVMVXToVMPatterns(MLIRContext *context,
                               SymbolTable &importSymbols,
                               RewritePatternSet &patterns) {
   patterns.insert<BinaryOpConversion, CopyOpConversion, Fill2DOpConversion,
-                  UnaryOpConversion>(context, importSymbols, typeConverter);
+                  TopkOpConversion, UnaryOpConversion>(context, importSymbols,
+                                                       typeConverter);
 }
 
 } // namespace mlir::iree_compiler
