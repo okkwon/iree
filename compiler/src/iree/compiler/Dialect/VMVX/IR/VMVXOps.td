@@ -227,6 +227,46 @@ def VMVX_UnaryOp : VMVX_Op<"unary", [SameVariadicOperandSize]> {
   }];
 }
 
+def VMVX_TopkOp : VMVX_Op<"topk", [SameVariadicOperandSize]> {
+  let summary = "Performs a Top-K operation";
+  let description = [{
+    Performs Top-K on a ND tensors. The input has `d` elements on the D
+    dimension, while the output has `k` elements on the D dimension.  The first
+    output contains the top K elements while the second output the locations of
+    them.
+  }];
+  let arguments = (ins
+    // IN.
+    VMVX_Buffer:$in_buffer,
+    VMVX_Index:$in_offset,
+    Variadic<VMVX_Index>:$in_strides,
+    // OUT0.
+    VMVX_Buffer:$out0_buffer,
+    VMVX_Index:$out0_offset,
+    Variadic<VMVX_Index>:$out0_strides,
+    // OUT1.
+    VMVX_Buffer:$out1_buffer,
+    VMVX_Index:$out1_offset,
+    Variadic<VMVX_Index>:$out1_strides,
+    // Dimensions.
+    VMVX_Index:$n,
+    VMVX_Index:$d,
+    VMVX_Index:$k,
+
+    VMVX_ElementTypeAttr:$element_type
+  );
+
+  let assemblyFormat = [{
+    `in` `` `(` $in_buffer `offset` $in_offset `strides` `[` $in_strides `]` `:` type($in_buffer) `)`
+    `out0` `` `(` $out0_buffer `offset` $out0_offset `strides` `[` $out0_strides `]` `:` type($out0_buffer) `)`
+    `out1` `` `(` $out1_buffer `offset` $out1_offset `strides` `[` $out1_strides `]` `:` type($out1_buffer) `)`
+    `n` `` `(` $n `)`
+    `d` `` `(` $d `)`
+    `k` `` `(` $k `)`
+    attr-dict
+  }];
+}
+
 } // OpGroupABIOps
 
 #endif  // IREE_DIALECT_MODULES_VMVX_OPS
