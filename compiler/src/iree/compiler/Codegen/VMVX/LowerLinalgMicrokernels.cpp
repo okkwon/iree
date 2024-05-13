@@ -521,6 +521,90 @@ struct CopyEmitter {
   }
 };
 
+/// Emits a vmvx.topk op
+/// Only identity permutations are supported.
+struct TopkEmitter {
+  struct Descriptor {
+    Value buffer;
+    AffineMap indexingMap;
+    StridedBufferAnalysis bufferAnal;
+    StridedBufferDescriptor *bufferDesc = nullptr;
+    Descriptor(Value buffer, AffineMap indexingMap)
+        : buffer(buffer), indexingMap(indexingMap), bufferAnal(buffer) {}
+
+    unsigned getRank() { return indexingMap.getNumDims(); }
+  };
+  Descriptor in;
+  Descriptor out0;
+  Descriptor out1;
+
+  TopkEmitter(Descriptor input, Descriptor output0, Descriptor output1)
+      : in(input), out0(output0), out1(output1) {}
+
+  bool isIdentity() {
+    return in.indexingMap.isIdentity() && out0.indexingMap.isIdentity() &&
+           out1.indexingMap.isIdentity();
+  }
+
+  bool checkRank() {
+    return in.getRank() == 2 && out0.getRank() == 2 && out1.getRank() == 2;
+  }
+
+  LogicalResult initialize(Location loc, PatternRewriter &rewriter) {
+    if (!isIdentity())
+      return rewriter.notifyMatchFailure(loc, "Expect identity indexing maps");
+    if (!checkRank())
+      return rewriter.notifyMatchFailure(loc, "rank != 2");
+
+    // Initialize buffer descriptors.
+    if (!in.bufferAnal.isValid() || !out0.bufferAnal.isValid() ||
+        !out1.bufferAnal.isValid()) {
+      return rewriter.notifyMatchFailure(loc,
+                                         "could not compute buffer descriptor");
+    }
+
+    // All pre-conditions pass. Mutate IR.
+    in.bufferDesc = &in.bufferAnal.getDesc(rewriter);
+    out0.bufferDesc = &out0.bufferAnal.getDesc(rewriter);
+    out1.bufferDesc = &out1.bufferAnal.getDesc(rewriter);
+    return success();
+  }
+
+  void emit(Location loc, PatternRewriter &rewriter) {
+    SmallVector<Value> inStrides =
+        permuteStrides(loc, in.indexingMap, in.bufferDesc->strides, rewriter);
+    SmallVector<Value> out0Strides = permuteStrides(
+        loc, out0.indexingMap, out0.bufferDesc->strides, rewriter);
+    SmallVector<Value> out1Strides = permuteStrides(
+        loc, out1.indexingMap, out1.bufferDesc->strides, rewriter);
+    SmallVector<Value> sizes = in.bufferDesc->sizes;
+    assert(out0Strides.size() == out0.bufferDesc->strides.size() &&
+           "output0 projection mismatched strides");
+    assert(out1Strides.size() == out1.bufferDesc->strides.size() &&
+           "output1 projection mismatched strides");
+    auto inBuffer = in.bufferDesc->castToLinear(loc, rewriter);
+    auto out0Buffer = out0.bufferDesc->castToLinear(loc, rewriter);
+    auto out1Buffer = out1.bufferDesc->castToLinear(loc, rewriter);
+
+    rewriter.create<IREE::VMVX::TopkOp>(
+        loc,
+        // IN
+        inBuffer, in.bufferDesc->offset, inStrides,
+        // OUT0
+        out0Buffer, out0.bufferDesc->offset, out0Strides,
+        // OUT1
+        out1Buffer, out1.bufferDesc->offset, out1Strides,
+        // N
+        in.bufferDesc->sizes[0],
+        // D
+        in.bufferDesc->sizes[1],
+        // K
+        out0.bufferDesc->sizes[1],
+        // Element type.
+        in.bufferDesc->getElementTypeAttr());
+  }
+};
+
 /// Matches a generic which contains an expressible binary operation, emitting
 /// as a vmvx op.
 struct LinalgBinaryGenericConversion
@@ -1409,6 +1493,42 @@ struct LinalgSoftmaxConversion : public OpRewritePattern<linalg::SoftmaxOp> {
   }
 };
 
+/// Matches a softmax with NC.
+struct LinalgExtTopkConversion
+    : public OpRewritePattern<IREE::LinalgExt::TopkOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(IREE::LinalgExt::TopkOp op,
+                                PatternRewriter &rewriter) const override {
+    if (op.getInputRank() != 2) {
+      return rewriter.notifyMatchFailure(op, "Expected 2D for TopK input.");
+    }
+    if (op.getDimension() != 1) {
+      return rewriter.notifyMatchFailure(
+          op, "Expected the innermost dim for topk dimension.");
+    }
+    Operation *scalarOp = &op.getBody()->getOperations().front();
+    auto cmpFOp = dyn_cast<arith::CmpFOp>(scalarOp);
+    if (!cmpFOp || cmpFOp.getPredicate() != arith::CmpFPredicate::OGT) {
+      return rewriter.notifyMatchFailure(op, "Expected arith.cmpf ogt.");
+    }
+
+    auto identityMap =
+        AffineMap::getMultiDimIdentityMap(2, rewriter.getContext());
+    Value input = op.getOperand(0);
+    Value output0 = op.getOperand(1);
+    Value output1 = op.getOperand(2);
+
+    auto emitter = TopkEmitter(TopkEmitter::Descriptor(input, identityMap),
+                               TopkEmitter::Descriptor(output0, identityMap),
+                               TopkEmitter::Descriptor(output1, identityMap));
+    if (failed(emitter.initialize(op.getLoc(), rewriter)))
+      return failure();
+    emitter.emit(op.getLoc(), rewriter);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 } // namespace
 
 class VMVXLowerLinalgMicrokernelsPass
@@ -1422,9 +1542,10 @@ class VMVXLowerLinalgMicrokernelsPass
     RewritePatternSet patterns(&getContext());
     patterns.insert<LinalgBinaryGenericConversion, LinalgCmpEqToF32Conversion,
                     LinalgCmpI32ExtUI8TruncI1UItoFP32Conversion,
-                    LinalgFillConversion, LinalgTrivialGenericConversion,
-                    LinalgReduceNCConversion, LinalgSoftmaxConversion,
-                    LinalgUnaryGenericConversion>(&getContext());
+                    LinalgExtTopkConversion, LinalgFillConversion,
+                    LinalgTrivialGenericConversion, LinalgReduceNCConversion,
+                    LinalgSoftmaxConversion, LinalgUnaryGenericConversion>(
+        &getContext());
 
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             std::move(patterns)))) {
