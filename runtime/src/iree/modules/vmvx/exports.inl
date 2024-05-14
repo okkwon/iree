@@ -59,6 +59,7 @@ EXPORT_FN("softmax.2d.f32", iree_uk_x32u_softmaxf_2d, ukernel_x32u_2d, rIIIrIIII
 EXPORT_FN("sub.2d.f32", iree_uk_x32b_subf_2d, ukernel_x32b_2d, rIIIrIIIrIIIII, v)
 EXPORT_FN("sub.2d.i32", iree_uk_x32b_subi_2d, ukernel_x32b_2d, rIIIrIIIrIIIII, v)
 EXPORT_FN("tanh.2d.f32", iree_uk_x32u_tanhf_2d, ukernel_x32u_2d, rIIIrIIIII, v)
+EXPORT_FN("topk.2d.f32", iree_uk_topkf_2d, topk_2d_x32, rIIIrIIIrIIIIII, v)
 EXPORT_FN("unpack", iree_vmvx_unpack, unpack, rIIrIIIIIIIIi, v)
 EXPORT_FN("xor.2d.i32", iree_uk_x32b_xori_2d, ukernel_x32b_2d, rIIIrIIIrIIIII, v)
 

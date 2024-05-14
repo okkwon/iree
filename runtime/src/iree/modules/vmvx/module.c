@@ -701,6 +701,99 @@ IREE_VMVX_ABI_EXPORT(iree_vmvx_unpack, unpack, v) {
 }
 
 //===----------------------------------------------------------------------===//
+// Exported unpack function definitions
+//===----------------------------------------------------------------------===//
+
+IREE_VMVX_ABI_FIXED_STRUCT(topk_2d_x32, rIIIrIIIrIIIIII, {
+  iree_vm_ref_t in_ref;
+  int64_t in_offset;
+  int64_t in_stride0;
+  int64_t in_stride1;
+  iree_vm_ref_t out0_ref;
+  int64_t out0_offset;
+  int64_t out0_stride0;
+  int64_t out0_stride1;
+  iree_vm_ref_t out1_ref;
+  int64_t out1_offset;
+  int64_t out1_stride0;
+  int64_t out1_stride1;
+  int64_t n;
+  int64_t d;
+  int64_t k;
+});
+IREE_VMVX_ABI_DEFINE_SHIM(topk_2d_x32, v);
+
+typedef struct {
+  float val;
+  int32_t ind;
+} item;
+
+static int cmp_item(const void* a, const void* b) {
+  return ((item*)a)->val - ((item*)b)->val;
+}
+
+IREE_VMVX_ABI_EXPORT(iree_uk_topkf_2d, topk_2d_x32, v) {
+  const int elem_size = 4;
+  if (args->in_stride1 != 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Expect 1 for in_stride1");
+  }
+  if (args->out0_stride1 != 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Expect 1 for out0_stride1");
+  }
+  if (args->out1_stride1 != 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Expect 1 for out1_stride1");
+  }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  MAP_BUFFER_2D_UNTYPED_RO(in,
+                           /*dtype_size=*/elem_size,
+                           /*buffer_ref=*/args->in_ref,
+                           /*offset=*/args->in_offset,
+                           /*stride0=*/args->in_stride0,
+                           /*stride1=*/args->in_stride1,
+                           /*size0=*/args->n,
+                           /*size1=*/args->d);
+  MAP_BUFFER_2D_UNTYPED_RW(out0, /*dtype_size=*/elem_size,
+                           /*buffer_ref=*/args->out0_ref,
+                           /*offset=*/args->out0_offset,
+                           /*stride0=*/args->out0_stride0,
+                           /*stride1=*/args->out0_stride1,
+                           /*size0=*/args->n,
+                           /*size1=*/args->k);
+  MAP_BUFFER_2D_UNTYPED_RW(out1, /*dtype_size=*/elem_size,
+                           /*buffer_ref=*/args->out1_ref,
+                           /*offset=*/args->out1_offset,
+                           /*stride0=*/args->out1_stride0,
+                           /*stride1=*/args->out1_stride1,
+                           /*size0=*/args->n,
+                           /*size1=*/args->k);
+  // buffer for sorted value.
+  const int64_t nd = args->n * args->d;
+
+  item* items = (item*)malloc(nd * sizeof(item));
+
+  for (int64_t i = 0; i < args->n; ++i) {
+    const float* in_ptr = ((const float*)in) + args->in_stride0 * i;
+    float* out0_ptr = ((float*)out0) + args->out0_stride0 * i;
+    int32_t* out1_ptr = ((int32_t*)out1) + args->out1_stride0 * i;
+    for (int64_t j = 0; j < args->d; ++j) {
+      items[i].val = in_ptr[0];
+      items[i].ind = j;
+    }
+    qsort(items, nd, sizeof(item), cmp_item);
+    for (int64_t j = 0; j < args->k; ++j) {
+      out0_ptr[j] = items[j].val;
+      out1_ptr[j] = items[j].ind;
+    }
+  }
+  free(items);
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+//===----------------------------------------------------------------------===//
 // Exported query_tile_sizes function definitions
 //===----------------------------------------------------------------------===//
 IREE_VMVX_ABI_FIXED_STRUCT(query_tile_sizes_1d, Ii, {
